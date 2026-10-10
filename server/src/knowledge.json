@@ -1,0 +1,30 @@
+[
+  {
+    "id": "sample-coe",
+    "title": "Certificate of Enrollment request (sample)",
+    "category": "Procedures",
+    "content": "DEMO ONLY — A sample request may ask the student to complete a request form and provide proof of identity. Requirements, fees, processing time, and submission steps have not been verified by USTP. Confirm the current process with the Registrar before acting.",
+    "office": "Registrar’s Office (sample routing)",
+    "source": "Capstone demonstration sample; not an official USTP source",
+    "lastUpdated": "Demo record — not verified",
+    "metadata": { "verificationNote": "Illustrative capstone data only; replace with reviewed official source." },
+    "dataStatus": "demo_unverified",
+    "keywords": ["certificate of enrollment", "coe", "requirements", "request", "procedure", "registrar"],
+    "demo": true,
+    "active": true
+  },
+  {
+    "id": "sample-registrar",
+    "title": "Registrar’s Office (directory placeholder)",
+    "category": "Offices",
+    "content": "DEMO ONLY — The Registrar is the suggested office to contact for academic documents and enrollment certifications. Campus location, office hours, telephone number, and email have not been verified and are intentionally omitted.",
+    "office": "Registrar’s Office",
+    "source": "Capstone directory placeholder; not an official USTP source",
+    "lastUpdated": "Demo record — not verified",
+    "metadata": { "verificationNote": "Illustrative capstone data only; location and contacts are intentionally omitted." },
+    "dataStatus": "demo_unverified",
+    "keywords": ["registrar", "location", "where", "contact", "office", "tor", "transcript"],
+    "demo": true,
+    "active": true
+  }
+]
