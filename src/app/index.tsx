@@ -1,336 +1,335 @@
-import { router } from 'expo-router';
-import { useState } from 'react';
-import { authenticateDemo, hasConfiguredApi, signIn, validEmail } from '../services/auth';
+import { Redirect, router } from 'expo-router';
+import { useRef, useState, useSyncExternalStore } from 'react';
 import {
-  Image,
-  ImageBackground,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
+  ActivityIndicator, Image, ImageBackground, KeyboardAvoidingView, Platform,
+  Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Brand } from '../constants/brand';
+import { authenticateDemo, hasConfiguredApi, signIn, useSession, validEmail } from '../services/auth';
 
 const DEMO_EMAIL = 'student@ustp.edu.ph';
 const DEMO_PASSWORD = 'student123';
+const subscribeToHydration = () => () => {};
+const clientHydrationSnapshot = () => true;
+const serverHydrationSnapshot = () => false;
 
 export default function LoginScreen() {
+  const session = useSession();
+  // Static export and initial browser hydration share the same mobile markup.
+  // Apply viewport-dependent styles and content after hydration completes.
+  const hydrated = useSyncExternalStore(subscribeToHydration, clientHydrationSnapshot, serverHydrationSnapshot);
+  const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const isDesktop = hydrated && width >= 980;
+  const passwordInput = useRef<TextInput>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [demoMode, setDemoMode] = useState(!hasConfiguredApi);
+  const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [signingIn, setSigningIn] = useState(false);
+  const [demoSelected, setDemoSelected] = useState(false);
+  const [showAccountHelp, setShowAccountHelp] = useState(false);
+  const [focusedField, setFocusedField] = useState<'email' | 'password' | null>(null);
 
   const fillDemoAccount = () => {
     setEmail(DEMO_EMAIL);
     setPassword(DEMO_PASSWORD);
-    setDemoMode(true);
+    setDemoSelected(true);
     setError('');
   };
 
   const handleSignIn = async () => {
-    if (!email.trim() || !password) {
-      setError('Enter your email and password to continue.');
+    if (loading) return;
+    if (!validEmail(email)) { setError('Enter a valid email address to continue.'); return; }
+    if (!password) {
+      setError('Enter your password to continue.');
+      passwordInput.current?.focus();
       return;
     }
-    if (!validEmail(email)) {
-      setError('Enter a valid email address.');
+    if (!demoSelected && !hasConfiguredApi) {
+      setError('Account sign-in is unavailable in this preview. Choose Demo Profile to explore TRAIL.');
       return;
     }
-    setSigningIn(true);
     setError('');
+    setLoading(true);
     try {
-      if (demoMode) {
-        if (!(await authenticateDemo(email, password))) {
-          setError('That demo email or password is incorrect. Tap Demo Profile to fill the sample credentials.');
-          return;
+      if (demoSelected) {
+        if (!await authenticateDemo(email, password)) {
+          setError('Demo details have changed. Choose Demo Profile again to restore them.');
         }
       } else {
         await signIn(email, password);
       }
-      router.replace('/dashboard');
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not sign in. Please try again.');
+      setError(cause instanceof Error ? cause.message : 'Unable to sign in. Please try again.');
     } finally {
-      setSigningIn(false);
+      setLoading(false);
     }
   };
 
+  if (session) return <Redirect href="/dashboard" />;
+
   return (
-    <View style={styles.screen}>
-      <View pointerEvents="none" style={[styles.dotField, Platform.OS === 'web' && styles.webHidden]}>
-        {Array.from({ length: 220 }, (_, index) => (
-          <View key={index} style={styles.dot} />
-        ))}
-      </View>
-
-      <KeyboardAvoidingView
-        style={styles.keyboardView}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    <KeyboardAvoidingView
+      style={[styles.screen, { paddingTop: hydrated ? insets.top : 0, paddingBottom: hydrated ? insets.bottom : 0 }]}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
-        <ScrollView
-          contentContainerStyle={[
-            styles.scrollContent,
-            Platform.OS === 'web' && styles.scrollContentWeb,
-          ]}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={[
-            styles.loginFrame,
-            Platform.OS === 'web' && styles.loginFrameWeb,
-          ]}>
-            <View style={[styles.frameHeader, Platform.OS === 'web' && styles.webHidden]}>
-              <View style={styles.headerTitleGroup}>
-                <View style={styles.headerGlyph}><Text style={styles.headerGlyphText}>✦</Text></View>
-                <Text style={styles.frameTitle}>Login</Text>
-                <Text style={styles.frameDivider}>–</Text>
-                <Text style={styles.frameProduct}>Trailblazer AI</Text>
-              </View>
-              <Text style={styles.headerCampus}>USTP</Text>
-            </View>
-
-            <View style={[styles.card, Platform.OS === 'web' && styles.cardWeb]}>
-              <ImageBackground
-                source={require('../../assets/images/USTP.jpg')}
-                resizeMode="cover"
-                style={[
-                  styles.campusBanner,
-                  Platform.OS === 'web' && styles.campusBannerWeb,
-                ]}
-                imageStyle={styles.bannerImage}
-              >
-                <View style={styles.bannerShade} />
-                <View style={styles.bannerPills}>
-                  <View style={styles.bannerPill}>
-                    <Text style={styles.pillDot}>●</Text>
-                    <Text style={styles.pillText}>USTP Cagayan de Oro</Text>
-                  </View>
-                  <View style={[styles.bannerPill, styles.portalPill]}>
-                    <Text style={styles.pillDot}>●</Text>
-                    <Text style={styles.pillText}>Trailblazer Portal</Text>
-                  </View>
-                </View>
-                <View style={styles.campusCaption}>
-                  <Text style={styles.campusCaptionText}>UNIVERSITY OF SCIENCE AND TECHNOLOGY OF SOUTHERN PHILIPPINES</Text>
-                </View>
-              </ImageBackground>
-
-              <View style={[styles.formContent, Platform.OS === 'web' && styles.formContentWeb]}>
-                <View style={[styles.identity, Platform.OS === 'web' && styles.identityWeb]}>
-                  <View style={styles.logoTile}>
-                    <Image
-                      source={require('../../assets/images/ustp-logo.jpg')}
-                      resizeMode="contain"
-                      style={styles.logo}
-                      accessibilityLabel="USTP logo"
-                    />
-                    <View style={styles.aiStatus}><Text style={styles.aiStatusText}>AI 2.4</Text></View>
-                  </View>
-                  <Text style={styles.appTitle}>Trailblazer AI</Text>
-                  <Text style={styles.appSubtitle}>YOPAK NAK OKS SA USTP</Text>
-                </View>
-
-                <View style={[styles.formCard, Platform.OS === 'web' && styles.formCardWeb]}>
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={fillDemoAccount}
-                  style={({ pressed }) => [styles.demoProfile, pressed && styles.pressed]}
-                >
-                  <View style={styles.demoSpark}><Text style={styles.demoSparkText}>✦</Text></View>
-                  <View style={styles.demoCopy}>
-                    <Text style={styles.demoTitle}>Demo Profile</Text>
-                    <Text style={styles.demoName}>Demo student · Sample access only</Text>
-                  </View>
-                  <View style={styles.fillPill}><Text style={styles.fillPillText}>1-Click Fill</Text></View>
-                </Pressable>
-
-                <View style={styles.fieldHeading}>
-                  <Text style={styles.label}>Account email</Text>
-                  <Text style={styles.fieldExample}>{demoMode ? 'DEMO ACCOUNT' : 'REGISTERED ACCOUNT'}</Text>
-                </View>
-                <View style={styles.inputShell}>
-                  <Text style={styles.inputIcon}>▣</Text>
-                  <TextInput
-                    value={email}
-                    onChangeText={(value) => { setEmail(value); setError(''); }}
-                    placeholder="Enter your registered email"
-                    placeholderTextColor="#8B98A8"
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    keyboardType="email-address"
-                    returnKeyType="next"
-                    style={styles.input}
-                    accessibilityLabel="Account email"
-                  />
-                </View>
-
-                <View style={styles.fieldHeading}>
-                  <Text style={styles.label}>Password</Text>
-                  <Pressable accessibilityRole="button" onPress={() => router.push('/forgot-password')}>
-                    <Text style={styles.forgotText}>Forgot password?</Text>
-                  </Pressable>
-                </View>
-                <View style={styles.inputShell}>
-                  <Text style={styles.inputIcon}>▣</Text>
-                  <TextInput
-                    value={password}
-                    onChangeText={(value) => { setPassword(value); setError(''); }}
-                    placeholder="Enter your TRAIL account password"
-                    placeholderTextColor="#8B98A8"
-                    secureTextEntry={!showPassword}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    returnKeyType="go"
-                    onSubmitEditing={handleSignIn}
-                    style={styles.input}
-                    accessibilityLabel="TRAIL account password"
-                  />
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
-                    onPress={() => setShowPassword((visible) => !visible)}
-                    hitSlop={8}
-                  >
-                    <Text style={styles.visibilityIcon}>{showPassword ? '◉' : '◎'}</Text>
-                  </Pressable>
-                </View>
-
-                <View style={styles.optionsRow}>
-                  <Text style={styles.rememberText}>Session lasts until the app closes</Text>
-                  <View style={styles.encryptedTag}>
-                    <Text style={styles.encryptedIcon}>◆</Text>
-                    <Text style={styles.encryptedText}>{demoMode ? 'Demo' : 'Account'}</Text>
-                  </View>
-                </View>
-
-                {error !== '' && (
-                  <View accessibilityRole="alert" style={styles.errorBox}>
-                    <Text style={styles.errorText}>{error}</Text>
-                  </View>
-                )}
-
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityState={{ disabled: signingIn }}
-                  disabled={signingIn}
-                  onPress={handleSignIn}
-                  style={({ pressed }) => [styles.signInButton, pressed && styles.buttonPressed]}
-                >
-                  <Text style={styles.signInText}>{signingIn ? 'Signing in…' : 'Sign In'}</Text>
-                  <Text style={styles.signInArrow}>→</Text>
-                </Pressable>
-
-                <View style={styles.dividerRow}>
-                  <View style={styles.dividerLine} />
-                  <Text style={styles.dividerText}>OR CONTINUE WITH</Text>
-                  <View style={styles.dividerLine} />
-                </View>
-                {hasConfiguredApi && demoMode && <Pressable accessibilityRole="button" onPress={() => { setDemoMode(false); setEmail(''); setPassword(''); setError(''); }}><Text style={styles.forgotText}>Use my registered account</Text></Pressable>}
-                <Text style={styles.demoHint}>{demoMode ? 'DEMO / UNVERIFIED · Sample records only' : 'Sign in with an authorized TRAIL account'}</Text>
+        <View style={[
+          styles.layout, isDesktop && styles.desktopLayout,
+          { minHeight: hydrated ? Math.max(height - insets.top - insets.bottom, 0) : 0 },
+        ]}>
+          <View style={[styles.identityPanel, isDesktop && styles.identityPanelDesktop]}>
+            <ImageBackground
+              source={require('../../assets/images/USTP.jpg')}
+              resizeMode="cover"
+              imageStyle={{ width: '100%', height: '100%' }}
+              style={[styles.campusImage, isDesktop && { minHeight: Math.max(380, height * 0.5), flex: 1 }]}
+              accessibilityLabel="USTP Cagayan de Oro campus"
+              accessibilityRole="image"
+            >
+              <View style={[styles.brandPlate, isDesktop && styles.brandPlateDesktop]}>
+                <Image
+                  source={require('../../assets/images/ustp-logo.jpg')}
+                  resizeMode="contain"
+                  style={styles.logo}
+                  accessibilityLabel="University of Science and Technology of Southern Philippines logo"
+                />
+                <View style={styles.brandPlateCopy}>
+                  <Text style={styles.brandName}>TRAIL AI Desk</Text>
+                  <Text style={styles.brandDescriptor}>Your university information companion</Text>
                 </View>
               </View>
+            </ImageBackground>
+
+            <View style={[styles.heroCopy, isDesktop && styles.heroCopyDesktop]}>
+              <View style={styles.goldRule} />
+              <Text style={styles.heroEyebrow}>BUILT FOR THE USTP COMMUNITY</Text>
+              <Text accessibilityRole="header" style={[styles.heroTitle, isDesktop && styles.heroTitleDesktop]}>
+                Be certain.{"\n"}<Text style={styles.heroTitleAccent}>Choose TRAIL.</Text>
+              </Text>
+              <Text style={styles.heroDescription}>
+                Find university information, explore services, and get guidance for your next step. All in one conversation.
+              </Text>
+              {isDesktop && <Text style={styles.universityName}>
+                University of Science and Technology{"\n"}of Southern Philippines
+              </Text>}
             </View>
           </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </View>
+
+          <View style={[styles.authPanel, isDesktop && styles.authPanelDesktop]}>
+            <View style={styles.form}>
+              <View style={styles.portalLabel}>
+                <View style={styles.portalMark} />
+                <Text style={styles.portalLabelText}>STUDENT PORTAL</Text>
+              </View>
+              <Text accessibilityRole="header" style={styles.formTitle}>Welcome to TRAIL</Text>
+              <Text style={styles.formDescription}>A little clarity for your university journey. Sign in to get started.</Text>
+
+              <Text nativeID="login-email-label" style={styles.label}>Email address</Text>
+              <View style={[styles.inputShell, focusedField === 'email' && styles.inputFocused]}>
+                <TextInput
+                  value={email}
+                  onChangeText={(value) => { setEmail(value); setError(''); setDemoSelected(false); }}
+                  placeholder="you@ustp.edu.ph"
+                  placeholderTextColor={Brand.muted}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  autoComplete="email"
+                  keyboardType="email-address"
+                  returnKeyType="next"
+                  onSubmitEditing={() => passwordInput.current?.focus()}
+                  onFocus={() => setFocusedField('email')}
+                  onBlur={() => setFocusedField(null)}
+                  editable={!loading}
+                  style={styles.input}
+                  accessibilityLabel="Email address"
+                  accessibilityLabelledBy="login-email-label"
+                />
+              </View>
+
+              <View style={styles.passwordHeading}>
+                <Text nativeID="login-password-label" style={styles.passwordLabel}>Password</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => router.push('/forgot-password')}
+                  style={({ pressed }) => [styles.textButton, pressed && styles.pressed]}
+                >
+                  <Text style={styles.link}>Forgot password?</Text>
+                </Pressable>
+              </View>
+              <View style={[styles.inputShell, focusedField === 'password' && styles.inputFocused]}>
+                <TextInput
+                  ref={passwordInput}
+                  value={password}
+                  onChangeText={(value) => { setPassword(value); setError(''); setDemoSelected(false); }}
+                  placeholder="Enter your password"
+                  placeholderTextColor={Brand.muted}
+                  secureTextEntry={!showPassword}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  autoComplete="current-password"
+                  returnKeyType="go"
+                  onSubmitEditing={handleSignIn}
+                  onFocus={() => setFocusedField('password')}
+                  onBlur={() => setFocusedField(null)}
+                  editable={!loading}
+                  style={styles.input}
+                  accessibilityLabel="Password"
+                  accessibilityLabelledBy="login-password-label"
+                />
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+                  onPress={() => setShowPassword((visible) => !visible)}
+                  style={({ pressed }) => [styles.passwordToggle, pressed && styles.pressed]}
+                >
+                  <Text style={styles.passwordToggleText}>{showPassword ? 'Hide' : 'Show'}</Text>
+                </Pressable>
+              </View>
+
+              {error !== '' && (
+                <View accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.errorBox}>
+                  <Text style={styles.errorText}>{error}</Text>
+                </View>
+              )}
+              {demoSelected && <Text accessibilityLiveRegion="polite" style={styles.demoSelectedHint}>
+                Demo Profile selected. Continue with the sample student account below.
+              </Text>}
+              {!hasConfiguredApi && !demoSelected && <Text style={styles.previewHint}>
+                Preview mode: use Demo Profile below to explore the student workspace.
+              </Text>}
+
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ disabled: loading, busy: loading }}
+                disabled={loading}
+                onPress={handleSignIn}
+                style={({ pressed }) => [styles.signInButton, pressed && styles.buttonPressed, loading && styles.disabledButton]}
+              >
+                {loading && <ActivityIndicator size="small" color={Brand.surface} />}
+                <Text style={styles.signInText}>{loading ? 'Signing in…' : demoSelected ? 'Open demo workspace' : 'Sign in'}</Text>
+                {!loading && <Text aria-hidden style={styles.signInArrow}>→</Text>}
+              </Pressable>
+
+              <View style={styles.accountRow}>
+                <Text style={styles.accountPrompt}>New to TRAIL?</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded: showAccountHelp }}
+                  onPress={() => setShowAccountHelp((visible) => !visible)}
+                  style={({ pressed }) => [styles.textButton, pressed && styles.pressed]}
+                >
+                  <Text style={styles.link}>Create account</Text>
+                </Pressable>
+              </View>
+              {showAccountHelp && <View accessibilityLiveRegion="polite" style={styles.accountHelp}>
+                <Text style={styles.accountHelpTitle}>Need a student account?</Text>
+                <Text style={styles.accountHelpText}>
+                  Student accounts are provisioned by a university administrator. Self-registration is not available in this version. Contact your university administrator to request access.
+                </Text>
+              </View>}
+
+              <View style={styles.dividerRow}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>TAKE A LOOK AROUND</Text>
+                <View style={styles.dividerLine} />
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Use Demo Profile to fill sample sign-in details"
+                accessibilityState={{ selected: demoSelected, disabled: loading }}
+                disabled={loading}
+                onPress={fillDemoAccount}
+                style={({ pressed }) => [styles.demoProfile, demoSelected && styles.demoProfileSelected, pressed && styles.pressed]}
+              >
+                <View aria-hidden style={styles.demoAvatar}><Text style={styles.demoAvatarText}>T</Text></View>
+                <View style={styles.demoCopy}>
+                  <Text style={styles.demoTitle}>Demo Profile</Text>
+                  <Text style={styles.demoDescription}>Preview the student workspace</Text>
+                </View>
+                <Text style={styles.demoAction}>{demoSelected ? 'Selected' : 'Try demo'}</Text>
+              </Pressable>
+              <Text style={styles.footerText}>Clear information. Confident next steps.</Text>
+            </View>
+          </View>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
-const COLORS = {
-  backdrop: '#111820',
-  navy: '#1B2E50',
-  violet: '#7567F8',
-  ink: '#102342',
-  muted: '#627187',
-  line: '#E1E7F0',
-  pale: '#F0F4FC',
-  green: '#37C98A',
-  white: '#FFFFFF',
-};
-
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: COLORS.backdrop },
-  dotField: { ...StyleSheet.absoluteFill, flexDirection: 'row', flexWrap: 'wrap', alignContent: 'flex-start', paddingHorizontal: 1, paddingTop: 2, opacity: 0.42 },
-  dot: { width: 2, height: 2, borderRadius: 1, backgroundColor: '#83909E', marginHorizontal: 8, marginVertical: 7 },
-  keyboardView: { flex: 1 },
-  scrollContent: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 18, paddingVertical: 20 },
-  loginFrame: { width: '100%', maxWidth: 440, borderWidth: 2, borderColor: COLORS.violet, borderRadius: 20, overflow: 'hidden', backgroundColor: '#F8FAFE', shadowColor: '#000', shadowOffset: { width: 0, height: 18 }, shadowOpacity: 0.3, shadowRadius: 26, elevation: 12 },
-  frameHeader: { minHeight: 43, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#171D27' },
-  headerTitleGroup: { flexDirection: 'row', alignItems: 'center' },
-  headerGlyph: { width: 21, height: 21, borderRadius: 6, borderWidth: 1, borderColor: '#C3CBD4', alignItems: 'center', justifyContent: 'center', marginRight: 7 },
-  headerGlyphText: { color: '#E2E7ED', fontSize: 13 },
-  frameTitle: { color: '#F7F8FA', fontSize: 13, fontWeight: '700' },
-  frameDivider: { color: '#7D8996', marginHorizontal: 6, fontSize: 12 },
-  frameProduct: { color: '#C9D0D8', fontSize: 12 },
-  headerCampus: { color: '#ADB7C4', fontSize: 9, letterSpacing: 1.4, fontWeight: '800' },
-  card: { backgroundColor: '#F7F9FD' },
-  campusBanner: { height: 139, justifyContent: 'space-between', paddingHorizontal: 10, paddingTop: 10, paddingBottom: 10 },
-  bannerImage: { opacity: 0.98 },
-  bannerShade: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(8, 21, 38, 0.28)' },
-  bannerPills: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
-  bannerPill: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(18, 34, 54, 0.86)', borderRadius: 14, paddingHorizontal: 9, paddingVertical: 5 },
-  portalPill: { backgroundColor: 'rgba(247, 249, 253, 0.94)' },
-  pillDot: { fontSize: 7, color: COLORS.green },
-  pillText: { color: '#F7FAFC', fontSize: 9, fontWeight: '700' },
-  campusCaption: { alignSelf: 'flex-start', backgroundColor: 'rgba(12, 28, 45, 0.68)', borderRadius: 5, paddingHorizontal: 7, paddingVertical: 4 },
-  campusCaptionText: { color: '#F2F5F8', fontSize: 6, letterSpacing: 0.5, fontWeight: '700' },
-  formContent: { paddingHorizontal: 18, paddingBottom: 18 },
-  identity: { alignItems: 'center', marginTop: -32, marginBottom: 14 },
-  logoTile: { width: 62, height: 62, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.white, borderWidth: 1, borderColor: '#E5EAF2', shadowColor: '#102342', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 9, elevation: 4 },
-  logo: { width: 43, height: 43, borderRadius: 10 },
-  aiStatus: { position: 'absolute', right: -4, bottom: -5, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 3, backgroundColor: '#BDF4DB' },
-  aiStatusText: { fontSize: 7, color: '#08734A', fontWeight: '900' },
-  appTitle: { color: COLORS.ink, fontSize: 20, lineHeight: 25, fontWeight: '800', marginTop: 9 },
-  appSubtitle: { color: '#526782', fontSize: 9, letterSpacing: 0.4, marginTop: 1 },
-  demoProfile: { minHeight: 49, flexDirection: 'row', alignItems: 'center', backgroundColor: '#EEF3FC', borderRadius: 12, paddingHorizontal: 10, marginBottom: 15, borderWidth: 1, borderColor: '#E4EAF5' },
-  demoSpark: { width: 25, height: 25, borderRadius: 8, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', marginRight: 8 },
-  demoSparkText: { color: '#23A986', fontSize: 14 },
-  demoCopy: { flex: 1 },
-  demoTitle: { color: COLORS.ink, fontSize: 9, fontWeight: '800' },
-  demoName: { color: '#65758B', fontSize: 8, marginTop: 2 },
-  fillPill: { backgroundColor: COLORS.white, borderRadius: 7, paddingHorizontal: 8, paddingVertical: 5 },
-  fillPillText: { color: COLORS.navy, fontSize: 8, fontWeight: '800' },
-  fieldHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
-  label: { color: COLORS.ink, fontSize: 9, fontWeight: '800' },
-  fieldExample: { color: '#76849A', fontSize: 8 },
-  forgotText: { color: COLORS.navy, fontSize: 8, fontWeight: '700' },
-  inputShell: { height: 39, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: COLORS.line, borderRadius: 10, paddingHorizontal: 10, backgroundColor: COLORS.white, marginBottom: 13 },
-  inputIcon: { color: '#526A88', fontSize: 12, marginRight: 8 },
-  input: { flex: 1, minWidth: 0, height: '100%', paddingVertical: 0, color: COLORS.ink, fontSize: 10 },
-  visibilityIcon: { color: '#687991', fontSize: 16, paddingLeft: 8 },
-  optionsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: -2, marginBottom: 14 },
-  rememberOption: { flexDirection: 'row', alignItems: 'center' },
-  checkbox: { width: 12, height: 12, borderRadius: 3, borderWidth: 1, borderColor: '#8795A8', alignItems: 'center', justifyContent: 'center', marginRight: 6, backgroundColor: COLORS.white },
-  checkboxChecked: { backgroundColor: COLORS.navy, borderColor: COLORS.navy },
-  checkmark: { color: COLORS.white, fontSize: 9, lineHeight: 11, fontWeight: '900' },
-  rememberText: { color: '#54647B', fontSize: 8 },
-  encryptedTag: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  encryptedIcon: { color: '#20A879', fontSize: 8 },
-  encryptedText: { color: '#28896D', fontSize: 8, fontWeight: '700' },
-  errorBox: { backgroundColor: '#FFF0F0', borderWidth: 1, borderColor: '#F1CCCC', borderRadius: 9, padding: 8, marginBottom: 10 },
-  errorText: { color: '#A72B3A', fontSize: 9, lineHeight: 13 },
-  signInButton: { minHeight: 40, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.navy, borderRadius: 10, shadowColor: COLORS.navy, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.16, shadowRadius: 5, elevation: 2 },
-  signInText: { color: COLORS.white, fontSize: 10, fontWeight: '800' },
-  signInArrow: { color: COLORS.white, fontSize: 15, marginLeft: 8, marginTop: -1 },
-  dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 9, marginTop: 14, marginBottom: 8 },
-  dividerLine: { height: StyleSheet.hairlineWidth, flex: 1, backgroundColor: '#DDE3EC' },
-  dividerText: { color: '#728096', fontSize: 7, letterSpacing: 0.6, fontWeight: '700' },
-  demoHint: { color: '#8290A1', textAlign: 'center', fontSize: 8 },
-  pressed: { opacity: 0.82 },
-  buttonPressed: { opacity: 0.84, transform: [{ scale: 0.99 }] },
-  webHidden: { display: 'none' },
-  scrollContentWeb: { justifyContent: 'flex-start', alignItems: 'stretch', paddingHorizontal: 0, paddingVertical: 0, minHeight: '100%' },
-  loginFrameWeb: { width: '100%', maxWidth: 1440, alignSelf: 'center', flex: 1, borderWidth: 0, borderRadius: 0, shadowOpacity: 0, elevation: 0, backgroundColor: '#EEF3FB' },
-  cardWeb: { flex: 1, backgroundColor: '#EEF3FB' },
-  campusBannerWeb: { width: '100%', minWidth: 0, alignSelf: 'stretch', height: 145, paddingHorizontal: 18, paddingTop: 10, paddingBottom: 10, backgroundColor: '#E8EEF7' },
-  formContentWeb: { paddingHorizontal: 16, paddingBottom: 28, backgroundColor: '#EEF3FB' },
-  identityWeb: { marginTop: -30, marginBottom: 19 },
-  formCard: {},
-  formCardWeb: { width: '100%', maxWidth: 1280, alignSelf: 'center', padding: 16, borderRadius: 12, backgroundColor: COLORS.white },
+  screen: { flex: 1, backgroundColor: Brand.navy },
+  scrollContent: { flexGrow: 1 },
+  layout: { flex: 1, backgroundColor: Brand.surface },
+  desktopLayout: { flexDirection: 'row' },
+  identityPanel: { backgroundColor: Brand.navy },
+  identityPanelDesktop: { width: '48%' },
+  campusImage: { minHeight: 250, padding: 20, justifyContent: 'flex-start' },
+  brandPlate: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', maxWidth: '100%', backgroundColor: 'rgba(255,255,255,0.97)', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, gap: 12 },
+  brandPlateDesktop: { margin: 12 },
+  logo: { width: 48, height: 54 },
+  brandPlateCopy: { flexShrink: 1 },
+  brandName: { color: Brand.navy, fontWeight: '800', fontSize: 19, lineHeight: 26 },
+  brandDescriptor: { color: Brand.muted, fontSize: 14, lineHeight: 20, maxWidth: 250 },
+  heroCopy: { padding: 26, paddingBottom: 30 },
+  heroCopyDesktop: { paddingHorizontal: 44, paddingVertical: 38 },
+  goldRule: { width: 42, height: 4, borderRadius: 2, backgroundColor: Brand.gold, marginBottom: 20 },
+  heroEyebrow: { color: Brand.onNavy, fontSize: 14, lineHeight: 21, letterSpacing: 1.1, fontWeight: '600', marginBottom: 12 },
+  heroTitle: { color: Brand.surface, fontSize: 36, lineHeight: 43, fontWeight: '800', letterSpacing: -0.8 },
+  heroTitleDesktop: { fontSize: 48, lineHeight: 56, letterSpacing: -1.4 },
+  heroTitleAccent: { color: Brand.gold },
+  heroDescription: { color: Brand.onNavy, fontSize: 16, lineHeight: 26, marginTop: 18, maxWidth: 440 },
+  universityName: { color: Brand.onNavy, fontSize: 14, lineHeight: 22, marginTop: 30 },
+  authPanel: { paddingHorizontal: 24, paddingVertical: 38, justifyContent: 'center', alignItems: 'center', backgroundColor: Brand.surface },
+  authPanelDesktop: { width: '52%', paddingHorizontal: 48, paddingVertical: 46 },
+  form: { width: '100%', maxWidth: 440 },
+  portalLabel: { flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 18 },
+  portalMark: { width: 7, height: 18, backgroundColor: Brand.gold, borderRadius: 2 },
+  portalLabelText: { fontSize: 14, lineHeight: 20, letterSpacing: 1.5, fontWeight: '700', color: Brand.muted },
+  formTitle: { color: Brand.navy, fontWeight: '800', fontSize: 32, lineHeight: 40, letterSpacing: -0.7 },
+  formDescription: { color: Brand.muted, fontSize: 16, lineHeight: 25, marginTop: 10, marginBottom: 30 },
+  label: { color: Brand.ink, fontSize: 15, lineHeight: 22, fontWeight: '600', marginBottom: 9 },
+  inputShell: { minHeight: 54, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: Brand.inputBorder, borderRadius: 10, backgroundColor: Brand.surface, marginBottom: 12 },
+  inputFocused: { borderColor: Brand.blue, borderWidth: 2 },
+  input: { flex: 1, minWidth: 0, minHeight: 52, paddingHorizontal: 15, paddingVertical: 12, color: Brand.ink, fontSize: 16 },
+  passwordHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', marginTop: 2 },
+  passwordLabel: { color: Brand.ink, fontSize: 15, lineHeight: 22, fontWeight: '600' },
+  textButton: { minHeight: 44, paddingHorizontal: 2, justifyContent: 'center' },
+  link: { color: Brand.blue, fontSize: 14, lineHeight: 22, fontWeight: '700', textDecorationLine: 'underline' },
+  passwordToggle: { minWidth: 64, minHeight: 52, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12 },
+  passwordToggleText: { color: Brand.blue, fontSize: 14, lineHeight: 20, fontWeight: '700' },
+  previewHint: { color: Brand.muted, fontSize: 14, lineHeight: 21, marginTop: 2, marginBottom: 16 },
+  demoSelectedHint: { color: Brand.blue, fontSize: 14, lineHeight: 21, marginTop: 2, marginBottom: 16 },
+  errorBox: { backgroundColor: '#FFF0F1', borderWidth: 1, borderColor: Brand.error, borderRadius: 8, padding: 12, marginBottom: 14 },
+  errorText: { color: Brand.error, fontSize: 14, lineHeight: 22 },
+  signInButton: { minHeight: 54, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, backgroundColor: Brand.navy, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 13, marginTop: 4 },
+  signInText: { color: Brand.surface, fontSize: 16, lineHeight: 24, fontWeight: '700' },
+  signInArrow: { color: Brand.surface, fontSize: 22, lineHeight: 26 },
+  disabledButton: { backgroundColor: Brand.disabled },
+  accountRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: 10 },
+  accountPrompt: { color: Brand.muted, fontSize: 14, lineHeight: 22 },
+  accountHelp: { backgroundColor: Brand.pale, borderWidth: 1, borderColor: Brand.line, borderRadius: 10, padding: 16, marginTop: 6 },
+  accountHelpTitle: { color: Brand.navy, fontSize: 15, lineHeight: 22, fontWeight: '700', marginBottom: 6 },
+  accountHelpText: { color: Brand.muted, fontSize: 14, lineHeight: 22 },
+  dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 20, marginBottom: 20 },
+  dividerLine: { height: 1, flex: 1, backgroundColor: Brand.line },
+  dividerText: { color: Brand.muted, fontSize: 14, lineHeight: 20, letterSpacing: 0.4, fontWeight: '500' },
+  demoProfile: { minHeight: 82, flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: Brand.canvas, borderWidth: 1, borderColor: Brand.inputBorder, borderRadius: 12, padding: 14 },
+  demoProfileSelected: { backgroundColor: Brand.pale, borderColor: Brand.blue, borderWidth: 2 },
+  demoAvatar: { width: 38, height: 38, borderRadius: 12, backgroundColor: Brand.goldPale, alignItems: 'center', justifyContent: 'center' },
+  demoAvatarText: { color: Brand.navy, fontSize: 18, lineHeight: 24, fontWeight: '800' },
+  demoCopy: { flex: 1, minWidth: 0 },
+  demoTitle: { color: Brand.navy, fontSize: 15, lineHeight: 22, fontWeight: '700' },
+  demoDescription: { color: Brand.muted, fontSize: 14, lineHeight: 21, marginTop: 2 },
+  demoAction: { color: Brand.blue, fontSize: 14, lineHeight: 21, fontWeight: '700', maxWidth: 70 },
+  footerText: { color: Brand.muted, textAlign: 'center', fontSize: 14, lineHeight: 22, marginTop: 25 },
+  pressed: { opacity: 0.76 },
+  buttonPressed: { backgroundColor: Brand.blue },
 });

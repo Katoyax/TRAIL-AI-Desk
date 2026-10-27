@@ -1,10 +1,13 @@
-import { Stack } from 'expo-router';
+import { Stack, usePathname } from 'expo-router';
+import Head from 'expo-router/head';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
+import '../global.css';
 import { signOut, useSession } from '../services/auth';
 
 export default function RootLayout() {
   const session = useSession();
+  const pathname = usePathname();
   useEffect(() => {
     if (!session?.expiresAt) return;
     const remaining = new Date(session.expiresAt).getTime() - Date.now();
@@ -14,7 +17,11 @@ export default function RootLayout() {
   }, [session]);
   return (
     <>
-      <StatusBar style="light" />
+      <Head>
+        <title>TRAIL AI Desk | USTP</title>
+        <meta name="description" content="Your USTP university information companion. Be certain. Choose TRAIL." />
+      </Head>
+      <StatusBar style={['/dashboard', '/ai-desk'].includes(pathname) ? 'dark' : 'light'} />
       <Stack
         screenOptions={{
           headerShown: false,
