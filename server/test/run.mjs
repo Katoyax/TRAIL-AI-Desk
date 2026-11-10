@@ -1,3 +1,4 @@
+await import('./config.test.mjs');
 await import('./rag.test.mjs');
 await import('./mobile-network.test.mjs');
 await import('./auth.test.mjs');

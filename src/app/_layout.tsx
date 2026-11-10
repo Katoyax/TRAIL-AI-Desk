@@ -29,6 +29,7 @@ export default function RootLayout() {
         }}
       >
         <Stack.Screen name="index" />
+        <Stack.Screen name="staff-login" />
         <Stack.Screen name="forgot-password" />
         <Stack.Screen name="reset-password" />
         <Stack.Protected guard={Boolean(session)}>
@@ -40,6 +41,7 @@ export default function RootLayout() {
         </Stack.Protected>
         <Stack.Protected guard={session?.user.role === 'admin' && !session.demo}>
           <Stack.Screen name="admin" />
+          <Stack.Screen name="admin-dashboard" />
         </Stack.Protected>
       </Stack>
     </>

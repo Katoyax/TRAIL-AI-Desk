@@ -25,12 +25,58 @@ export function signOut() {
 export const hasConfiguredApi = Boolean(apiUrl);
 export const validEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 
-export async function signIn(email: string, password: string) {
-  const result = await apiRequest<{ token: string; expiresAt?: string; user: SessionUser }>('/api/auth/login', {
-    method: 'POST', body: { email: email.trim().toLowerCase(), password },
+export async function signIn(
+  email: string,
+  password: string,
+  options: { requiredRole?: 'admin' } = {},
+) {
+  const result = await apiRequest<{
+    token: string;
+    expiresAt?: string;
+    user: SessionUser;
+  }>('/api/auth/login', {
+    method: 'POST',
+    body: {
+      email: email.trim().toLowerCase(),
+      password,
+    },
   });
-  if (!result.token || !result.user?.id || !['student', 'admin'].includes(result.user.role)) throw new Error('Invalid sign-in response.');
-  setSession({ ...result, demo: false });
+
+  if (
+    !result.token ||
+    !result.user?.id ||
+    !['student', 'admin'].includes(result.user.role)
+  ) {
+    // Revoke any token returned in a malformed response.
+    if (result.token) {
+      await apiRequest('/api/auth/logout', {
+        method: 'POST',
+        token: result.token,
+      }).catch(() => {});
+    }
+
+    throw new Error('Invalid sign-in response.');
+  }
+
+  // Staff Login currently accepts Admin accounts only.
+  if (
+    options.requiredRole &&
+    result.user.role !== options.requiredRole
+  ) {
+    await apiRequest('/api/auth/logout', {
+      method: 'POST',
+      token: result.token,
+    }).catch(() => {});
+
+    throw new Error(
+      'This account is not authorized to access the staff portal.'
+    );
+  }
+
+  setSession({
+    ...result,
+    demo: false,
+  });
 }
 
 export async function authenticateDemo(email: string, password: string) {
