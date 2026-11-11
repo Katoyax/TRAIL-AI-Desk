@@ -1,8 +1,12 @@
-import { Writable } from 'node:stream';
-import { createInterface } from 'node:readline/promises';
 import { MongoClient } from 'mongodb';
-import { createMongoAuthStore, ensureAuthIndexes } from './store.mjs';
+import dns from 'node:dns';
+import { createInterface } from 'node:readline/promises';
+import { Writable } from 'node:stream';
+import { validateMongoConfig } from '../config.mjs';
 import { provisionUser } from './service.mjs';
+import { createMongoAuthStore, ensureAuthIndexes } from './store.mjs';
+
+
 
 async function readPassword() {
   if (!process.stdin.isTTY) {
@@ -28,11 +32,28 @@ try {
   }
   const fields = Object.fromEntries(Array.from({ length: args.length / 2 }, (_, index) => [args[index * 2].slice(2), args[index * 2 + 1]]));
   if (!fields.email || !fields.name || !['student', 'admin'].includes(fields.role)) throw new Error('Email, name, and an explicit student or admin role are required.');
-  if (!process.env.MONGODB_URI) throw new Error('Configure MONGODB_URI before provisioning an account.');
-  const password = await readPassword();
-  client = new MongoClient(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 });
-  await client.connect();
-  const database = client.db(process.env.MONGODB_DATABASE || 'trail_ai_desk');
+  const target = validateMongoConfig(process.env, { allowDemo: false });
+
+const password = await readPassword();
+
+// Match the backend's optional Atlas DNS configuration.
+const dnsServer = process.env.MONGODB_DNS_SERVER?.trim();
+
+if (dnsServer) {
+  dns.setServers([dnsServer]);
+}
+
+// Match the backend's MongoDB connection options.
+client = new MongoClient(target.uri, {
+  serverSelectionTimeoutMS: 5000,
+  ...(process.env.MONGODB_IPV4_ONLY === 'true'
+    ? { family: 4 }
+    : {}),
+});
+
+await client.connect();
+
+  const database = client.db(target.databaseName);
   await ensureAuthIndexes(database);
   const user = await provisionUser(createMongoAuthStore({ database }), { ...fields, password });
   console.log(`Created ${user.role} account ${user.email}. No default accounts were created.`);
