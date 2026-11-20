@@ -87,7 +87,7 @@ For the current evidence baseline:
 - No successful live MongoDB connection has been independently confirmed.
 - A prior sanitized Atlas diagnostic reported `ECONNREFUSED`; its root cause remains unknown.
 - On 2026-11-09, the effective private configuration passed sanitized approved-target validation; the single isolated read-only ping failed and the client closed successfully.
-- Database-backed authentication is unverified.
+- The owner reports successful live Admin authentication and session revocation; this remains owner-reported manual evidence rather than a test rerun in this document.
 - Separate backend enforcement of all three roles is unverified.
 - Independent source approval and version eligibility are unverified.
 - External-provider exclusion of pending content is unverified.
@@ -116,6 +116,119 @@ No number of tests is recorded as newly executed or passed under P00-E4L.
 | Staff Sign In disabled | Source Verified; runtime unverified | The Staff route supplies a disabled submit state and no submit handler, authentication call, or session operation |
 | Admin/Knowledge-Base Manager authentication | Blocked — outside scope | Backend integration was not implemented or exercised |
 | Three-role authorization | Not Run — outside scope | Requires separately authorized backend work |
+
+### 3.2 P01A-ADMIN-STUDENT-PROVISION-01 current execution evidence
+
+**Date and environment:** 2026-11-11, local Windows development workspace, Node.js v22.23.2 resolved from the backend directory. No `.env` inspection, Atlas connection, or live account creation occurred.
+
+| Check | Actual result | Evidence and limitation |
+|---|---|---|
+| `node --test test/auth.test.mjs` | Passed — 27/27 | In-memory/fake auth stores; covers protected listing/provisioning, fixed Student role, scrypt verification, no plaintext persistence, duplicate/invalid input, role injection, unauthorized and expired sessions, safe fields, existing login/logout |
+| Direct TypeScript check | Passed | `node ..\node_modules\typescript\bin\tsc --noEmit -p ..\tsconfig.json`; root NVM wrapper was bypassed using the already active backend Node runtime |
+| Focused ESLint | Passed | New Student screen/service and modified Admin routes/dashboard passed after implementation-caused ref usage was corrected |
+| `node test/run.mjs` | Passed — 89/89 | Full local backend regression runner; no live Atlas operations |
+| Live Student provisioning | Not run | Explicitly prohibited during validation; real persistence and operational delivery remain unverified |
+| Rendered UI/device verification | Not run | No Expo web/native preview was requested in this checkpoint |
+
+### 3.3 P01A-ADMIN-PASSWORD-MANAGEMENT-03 current execution evidence
+
+**Date and environment:** 2026-11-11, local Windows workspace using the existing Node.js v22.23.2 backend runtime. Tests used fake/in-memory stores and mocked email delivery; no `.env` inspection, live Atlas write, or real email occurred.
+
+| Check | Actual result | Evidence and limitation |
+|---|---|---|
+| Backend syntax checks | Passed | `server/src/app.mjs`, `server/src/auth/service.mjs`, and `server/src/auth/store.mjs` |
+| `node --test test/auth.test.mjs` | Passed — 31/31 | Covers Admin initiation, registered destination, token exclusion, authorization, Student-only target, provider unavailability, cooldown/deduplication, request listing/status, generic public responses, and session revocation |
+| Direct TypeScript check | Passed | `node ..\node_modules\typescript\bin\tsc --noEmit -p ..\tsconfig.json` |
+| Focused ESLint | Passed | Changed Admin screens, protected layout, and client services |
+| `node test/run.mjs` | Passed — 93/93 | Full local backend regression; one non-failing Node experimental warning |
+| Live provider/Atlas verification | Not run | Prohibited by checkpoint; live request persistence and email acceptance remain unverified |
+| Rendered UI/device verification | Not run | No Expo preview was executed |
+
+### 3.4 P01A-STUDENT-PROVISIONING-04 current execution evidence
+
+**Date and environment:** 2026-11-19, local Windows workspace using the installed Node.js v22.23.2 runtime directly because the root NVM shim had no active version. Tests used in-memory/fake stores; no `.env` value was inspected, no Atlas connection occurred, and no live record was read, changed, or backfilled.
+
+| Check | Actual result | Evidence and limitation |
+|---|---|---|
+| Backend syntax checks | Passed | `server/src/app.mjs`, `server/src/auth/service.mjs`, and `server/src/auth/store.mjs` |
+| `node --test test/auth.test.mjs` | Passed â€” 32/32 | Covers required/unique Student IDs, leading-zero preservation, UUID identity preservation, temporary-password hashing, safe listing, forced initial change, and revocation of multiple temporary-password sessions; existing recovery/Admin cases also pass |
+| Direct TypeScript check | Passed | `node node_modules/typescript/bin/tsc --noEmit` using Node.js v22.23.2 |
+| Focused ESLint | Passed | Student management, initial-password screen, protected layout, shared login layout, and affected frontend services |
+| `node test/run.mjs` | Passed â€” 94/94 | Complete local backend regression; one non-failing Node experimental warning |
+| Rendered UI/device verification | Not run | No Expo preview was executed; reveal/hide/copy and responsive rendering remain source/type/lint verified only |
+| Live persistence/backfill | Not run | No Atlas operation was authorized or performed; the partial unique index will be ensured by normal authorized backend initialization, not by this test batch |
+
+### 3.5 P01A-STUDENT-ACCOUNT-LIFECYCLE-01 current execution evidence
+
+**Date and environment:** 2026-11-19, local Windows workspace using the installed Node.js v22.23.2 runtime directly. Tests used the in-memory authentication adapter; no `.env` inspection, Atlas connection, or live account lifecycle change occurred.
+
+| Check | Actual result | Evidence and limitation |
+|---|---|---|
+| Backend syntax checks | Passed | Native HTTP router, auth service, and MongoDB auth store |
+| `node --test test/auth.test.mjs` | Passed — 35/35 | Covers deactivation, login rejection, existing-session invalidation, reactivation, fresh login, persistent revocation, authorization, invalid targets/bodies, idempotence, preserved identity/credentials, and mandatory initial-password state |
+| Direct TypeScript check | Passed | `node node_modules/typescript/bin/tsc --noEmit` |
+| Focused ESLint | Passed | `src/app/student-management.tsx` and `src/services/students.ts` |
+| `node test/run.mjs` | Passed — 97/97 | Single broader backend regression pass; one non-failing Node experimental warning; command output was truncated by the tool but the final TAP summary was captured |
+| Rendered UI/device verification | Not run | Confirmation, loading, status update, and responsive behavior remain source/type/lint verified only |
+| Live Atlas lifecycle verification | Not run | Explicitly prohibited; no real Student or session was changed |
+
+### 3.6 P01A-FORGOT-PASSWORD-REQUEST-UI-01 current execution evidence
+
+**Date and environment:** 2026-11-19, local Windows workspace using the installed Node.js v22.23.2 runtime directly. Backend tests used in-memory/fake stores and mocked delivery; no `.env` inspection, Atlas connection, live request creation, or real email occurred.
+
+| Check | Actual result | Evidence and limitation |
+|---|---|---|
+| Backend syntax checks | Passed | `server/src/auth/service.mjs` and `server/src/app.mjs` |
+| `node --test test/auth.test.mjs` | Passed — 35/35 | Covers eligible active Student request creation, unknown/Staff/inactive exclusion, pending-request deduplication, generic responses, no token/email issuance by the public operation, Admin listing, and existing reset/authentication regressions |
+| Direct TypeScript check | Passed | `node node_modules/typescript/bin/tsc --noEmit` |
+| Focused ESLint | Passed | Changed Forgot Password screen, auth service, and focused authentication tests |
+| Rendered UI/device verification | Not run | No Expo preview was requested; updated copy, loading state, validation, and neutral confirmation are source/type/lint verified only |
+| Live request persistence/email delivery | Not run | Explicitly prohibited; Admin-initiated email delivery remains dependent on configured provider behavior and was exercised only with mocks |
+
+### 3.7 P01A-FORGOT-PASSWORD-ADMIN-RESET-02 current execution evidence
+
+**Date and environment:** 2026-11-19, local Windows workspace using Node.js v22.23.2 directly. Tests used in-memory/fake stores and a mocked MongoDB transaction; no `.env` inspection, Atlas connection, live account change, or email occurred.
+
+| Check | Actual result | Evidence and limitation |
+|---|---|---|
+| Backend syntax checks | Passed | `server/src/app.mjs`, `server/src/auth/service.mjs`, and `server/src/auth/store.mjs` |
+| `node --test test/auth.test.mjs` | Passed — 41/41 | Covers Admin authorization, identity confirmation, random password hashing, active Student validation, dismissal and storage-failure safety, session invalidation, mandatory password change, one-time response fields, concurrency, and MongoDB transaction usage |
+| `node test/run.mjs` | Passed — 102/102 | One complete local backend regression pass; one non-failing Node experimental warning |
+| Direct TypeScript check | Passed | `node node_modules/typescript/bin/tsc --noEmit` |
+| Focused ESLint excluding `server/src/app.mjs` | Passed | Password Requests screen/service, auth service/store, and test files |
+| `server/src/app.mjs` ESLint | Failed — pre-existing | Existing line 25 reports `Buffer is not defined`; the new Admin route produced no additional lint finding |
+| Combined lint from `server/` | Blocked — environment | Frontend import resolution attempted a prohibited scan of `C:\Users\Rensel`; the same focused file set passed when rerun from the repository root |
+| Rendered UI/device verification | Not run | No Expo preview was requested; confirmation, clipboard, responsive layout, and one-time credential presentation remain source/type/lint verified only |
+| Live Atlas transaction | Not run | Explicitly prohibited; production transaction behavior remains operationally unverified |
+
+### 3.8 P01A-FORGOT-PASSWORD-RATE-LIMIT-02 current execution evidence
+
+**Date and environment:** 2026-11-20, local Windows workspace using Node.js v22.23.2 directly. HTTP tests used isolated local API servers and deterministic clocks; no `.env` inspection, Atlas connection, database mutation, or real recovery request occurred.
+
+| Check | Actual result | Evidence and limitation |
+|---|---|---|
+| Backend syntax checks | Passed | `server/src/security/rate-limit.mjs` and `server/src/app.mjs` |
+| `node --test test/auth.test.mjs` | Passed — 44/44 | Covers dedicated Forgot Password capacity, 40/41 boundary, shared socket-IP behavior across rotated emails, independence from login/session traffic, separate-IP keys, fixed-window recovery, accurate `Retry-After`, ignored `X-Forwarded-For`, and preservation of general/auth limits and existing recovery behavior |
+| `node test/run.mjs` | Passed — 106/106 | One complete backend regression pass; one non-failing Node experimental warning |
+| Direct TypeScript check | Passed | `node node_modules/typescript/bin/tsc --noEmit` |
+| Focused ESLint | Passed | `server/src/security/rate-limit.mjs` and `server/test/auth.test.mjs` |
+| `server/src/app.mjs` ESLint | Failed — pre-existing | Existing line 25 reports `Buffer is not defined`; no new limiter-related lint finding was reported |
+| Live or multi-instance limiting | Not run | Tests verify one process with synthetic time and isolated sockets; distributed limiter behavior remains outside this checkpoint |
+
+### 3.9 P01B-KB-MANAGER-FOUNDATION-01 current execution evidence
+
+**Date and environment:** 2026-11-20, local Windows workspace using Node.js v22.23.2 directly. Tests used the in-memory authentication adapter and fake knowledge store; no `.env` inspection, Atlas connection, real account creation, or database mutation occurred.
+
+| Check | Actual result | Evidence and limitation |
+|---|---|---|
+| Backend syntax checks | Passed | `server/src/auth/service.mjs`, `server/src/auth/store.mjs`, and `server/src/app.mjs` |
+| `node --test test/auth.test.mjs` | Passed — 47/47 | Covers Admin-only manager provisioning, UUID and hashed temporary credential, safe listing, duplicate/privilege-field rejection, exact Staff role matching before session creation, Student denial, manager/Admin API isolation, mandatory password replacement, session revocation, inactive login denial, reactivation, and existing authentication/recovery regressions |
+| `node test/run.mjs` | Passed — 109/109 | One complete backend regression pass; one non-failing Node experimental warning |
+| Direct TypeScript check | Passed | `node node_modules/typescript/bin/tsc --noEmit` |
+| Focused ESLint | Passed | Changed frontend, auth service/store, helper, and test files |
+| `server/src/app.mjs` ESLint | Failed — pre-existing | Existing line 25 reports `Buffer is not defined`; no new route-related lint finding was reported |
+| Rendered UI/device verification | Not run | Role selector, responsive dashboards, clipboard behavior, and visual navigation are source/type/lint verified only |
+| Live Atlas role/account verification | Not run | Explicitly prohibited; manager persistence and operational login remain unverified |
 
 ## 4. Testing objectives and quality gates
 
@@ -807,4 +920,16 @@ Codex may inspect or modify the local repository only under explicit, bounded ow
 The project owner retains final authority over testing, scope, repository operations, acceptance, and phase advancement.
 
 Preparation or acceptance of this document does not by itself authorize test execution, database access, security scanning, provider requests, or implementation work outside an owner-approved checkpoint.
+
+## P01B-KNOWLEDGE-SOURCE-MANAGEMENT-01 execution evidence (2026-11-20)
+
+Local isolated verification used Node.js v22.23.2 and in-memory/fake persistence only; no `.env`, Atlas, provider, real account, or real university source was accessed.
+
+- Focused `auth.test.mjs` plus `knowledge.test.mjs`: initial run 70/71 because a new test supplied unsupported response fields to an edit request; the test input was corrected to exercise the intended submitted-draft conflict, and the focused knowledge suite then passed 24/24.
+- Full backend runner: 112/112 passed, 0 failed.
+- TypeScript `tsc --noEmit`: passed.
+- Focused ESLint over changed frontend/backend/tests: passed.
+- Rendered browser/device testing: NOT TESTED; no preview server was started in this checkpoint.
+
+Coverage establishes protected manager route access, safe manual draft validation, version preservation, ownership rejection, submission state, lack of draft chunks/embeddings, exclusion from public retrieval, and regression of existing authentication and approved-content retrieval. It does not establish live Atlas persistence, rendered interaction quality, independent review, or publication.
 

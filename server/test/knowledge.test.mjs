@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { Buffer } from 'node:buffer';
 import { createKnowledgeStore } from '../src/db/knowledge-store.mjs';
 import { createMemoryKnowledgeConnection } from './helpers/memory-knowledge.mjs';
 import { chunkText, cleanText, contentHash, decodeUpload, extractText } from '../src/ingestion/extract.mjs';
@@ -46,6 +47,92 @@ test('official URL ingestion requires explicit review; only verified active chun
   assert.equal(result.records[0].content, initialText);
   await fixture.store.unverifySource(pending.id, { actor });
   assert.equal((await fixture.store.searchChunks('certificate')).records.length, 0);
+});
+
+test('Knowledge Manager drafts reuse source versions without embeddings, chunks, or public retrieval', async () => {
+  const fixture = setup();
+  const manager = { id: 'test-manager' };
+  const draft = await fixture.store.createManagerDraft({
+    sourceType: 'office_verified_information',
+    title: 'Student services test source',
+    issuingOffice: 'Test Student Affairs Office',
+    supportingReferenceUrl: fixtureUrl,
+    content: 'TEST FIXTURE ONLY. Students should consult the issuing office for the approved process.',
+  }, { actor: manager });
+
+  assert.equal(draft.draftStatus, 'draft');
+  assert.equal(draft.isActive, false);
+  assert.equal(draft.version, 0);
+  assert.equal(draft.draftVersionNumber, 1);
+  assert.equal(fixture.calls, 0);
+  assert.equal(fixture.connection.collections.get('knowledge_chunks')?.length || 0, 0);
+  assert.equal((await fixture.store.list()).length, 0);
+  assert.equal((await fixture.store.searchChunks('students')).records.length, 0);
+  assert.equal((await fixture.store.listManagerSources()).length, 1);
+});
+
+test('Knowledge Manager draft edits preserve history and submitted drafts remain non-public', async () => {
+  const fixture = setup();
+  const manager = { id: 'test-manager' };
+  const original = await fixture.store.createManagerDraft({
+    sourceType: 'office_verified_information',
+    title: 'Test policy source',
+    issuingOffice: 'Test Policy Office',
+    supportingReferenceUrl: fixtureUrl,
+    content: 'TEST FIXTURE ONLY. This is the first complete draft of the policy source.',
+  }, { actor: manager });
+  const edited = await fixture.store.updateManagerDraft(original.id, {
+    sourceType: 'office_verified_information',
+    title: 'Updated test policy source',
+    issuingOffice: 'Test Policy Office',
+    supportingReferenceUrl: fixtureUrl,
+    content: 'TEST FIXTURE ONLY. This is the second complete draft and preserves the first version.',
+    expectedRevision: original.revision,
+  }, { actor: manager });
+
+  assert.equal(edited.draftVersionNumber, 2);
+  const history = await fixture.store.managerVersions(original.id);
+  assert.deepEqual(history.map((version) => version.version), [2, 1]);
+  assert.equal(history[0].isDraft, true);
+  assert.equal(history[1].verificationStatus, 'archived_draft');
+
+  const submitted = await fixture.store.submitManagerDraft(original.id, {
+    actor: manager,
+    expectedRevision: edited.revision,
+  });
+  assert.equal(submitted.draftStatus, 'pending_review');
+  assert.equal(submitted.isActive, false);
+  assert.equal((await fixture.store.list()).length, 0);
+  assert.equal((await fixture.store.searchChunks('policy')).records.length, 0);
+  await assert.rejects(
+    fixture.store.updateManagerDraft(original.id, {
+      sourceType: 'office_verified_information', title: edited.title,
+      issuingOffice: edited.issuingOffice, supportingReferenceUrl: edited.supportingReferenceUrl,
+      content: `${edited.content} Changed.`, expectedRevision: submitted.revision,
+    }, { actor: manager }),
+    { status: 409 },
+  );
+  const repeated = await fixture.store.submitManagerDraft(original.id, { actor: manager, expectedRevision: submitted.revision });
+  assert.equal(repeated.draftVersion, submitted.draftVersion);
+});
+
+test('Knowledge Manager draft validation and ownership reject unsafe source mutations', async () => {
+  const fixture = setup();
+  await assert.rejects(fixture.store.createManagerDraft({
+    sourceType: 'official_webpage', title: 'Unsupported', issuingOffice: 'Test Office',
+    supportingReferenceUrl: fixtureUrl, content: initialText,
+  }, { actor }), { status: 400 });
+  await assert.rejects(fixture.store.createManagerDraft({
+    sourceType: 'office_verified_information', title: 'Missing governance fields', content: initialText,
+  }, { actor }), { status: 400 });
+  const draft = await fixture.store.createManagerDraft({
+    sourceType: 'office_verified_information', title: 'Owned test source', issuingOffice: 'Test Office',
+    supportingReferenceUrl: fixtureUrl, content: initialText,
+  }, { actor });
+  await assert.rejects(fixture.store.updateManagerDraft(draft.id, {
+    sourceType: 'office_verified_information', title: 'Forged edit', issuingOffice: 'Test Office',
+    supportingReferenceUrl: fixtureUrl, content: initialText, expectedRevision: draft.revision,
+  }, { actor: { id: 'another-manager' } }), { status: 403 });
 });
 
 test('verified lexical retrieval rejects an unknown office matched only by generic directory words', async () => {

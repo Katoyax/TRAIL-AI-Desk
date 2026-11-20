@@ -60,6 +60,7 @@ export async function connectMongo({
     });
 
     await sources.createIndex({ category: 1, isActive: 1 });
+    await sources.createIndex({ createdBy: 1, draftStatus: 1, lastUpdated: -1 });
     await sources.createIndex(
       { sourceUrl: 1 },
       { sparse: true }

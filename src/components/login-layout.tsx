@@ -19,7 +19,13 @@ type LoginLayoutProps = {
   password: string;
   onEmailChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
+  emailEditable?: boolean;
+  emailLabel?: string;
+  passwordLabel?: string;
+  preFormFields?: ReactNode;
+  formFields?: ReactNode;
   onSubmit?: () => void;
+  onPasswordSubmitEditing?: () => void;
   submitLabel: string;
   submitDisabled?: boolean;
   loading?: boolean;
@@ -46,7 +52,13 @@ export function LoginLayout({
   password,
   onEmailChange,
   onPasswordChange,
+  emailEditable = true,
+  emailLabel = 'Email address',
+  passwordLabel = 'Password',
+  preFormFields,
+  formFields,
   onSubmit,
+  onPasswordSubmitEditing,
   submitLabel,
   submitDisabled = false,
   loading = false,
@@ -138,7 +150,9 @@ export function LoginLayout({
               <Text accessibilityRole="header" style={styles.formTitle}>{title}</Text>
               <Text style={styles.formDescription}>{description}</Text>
 
-              <Text nativeID={emailLabelId} style={styles.label}>Email address</Text>
+              {preFormFields}
+
+              <Text nativeID={emailLabelId} style={styles.label}>{emailLabel}</Text>
               <View style={[styles.inputShell, focusedField === 'email' && styles.inputFocused]}>
                 <TextInput
                   value={email}
@@ -153,15 +167,15 @@ export function LoginLayout({
                   onSubmitEditing={() => resolvedPasswordInput.current?.focus()}
                   onFocus={() => setFocusedField('email')}
                   onBlur={() => setFocusedField(null)}
-                  editable={!loading}
+                  editable={!loading && emailEditable}
                   style={styles.input}
-                  accessibilityLabel="Email address"
+                  accessibilityLabel={emailLabel}
                   accessibilityLabelledBy={emailLabelId}
                 />
               </View>
 
               <View style={styles.passwordHeading}>
-                <Text nativeID={passwordLabelId} style={styles.passwordLabel}>Password</Text>
+                <Text nativeID={passwordLabelId} style={styles.passwordLabel}>{passwordLabel}</Text>
                 {onForgotPassword && <Pressable
                   accessibilityRole="button"
                   onPress={onForgotPassword}
@@ -181,13 +195,13 @@ export function LoginLayout({
                   autoCapitalize="none"
                   autoCorrect={false}
                   autoComplete="current-password"
-                  returnKeyType={submitDisabled ? 'done' : 'go'}
-                  onSubmitEditing={submitDisabled ? undefined : onSubmit}
+                  returnKeyType={onPasswordSubmitEditing ? 'next' : submitDisabled ? 'done' : 'go'}
+                  onSubmitEditing={loading || submitDisabled ? undefined : onPasswordSubmitEditing ?? onSubmit}
                   onFocus={() => setFocusedField('password')}
                   onBlur={() => setFocusedField(null)}
                   editable={!loading}
                   style={styles.input}
-                  accessibilityLabel="Password"
+                  accessibilityLabel={passwordLabel}
                   accessibilityLabelledBy={passwordLabelId}
                 />
                 <Pressable
@@ -199,6 +213,8 @@ export function LoginLayout({
                   <Text style={styles.passwordToggleText}>{showPassword ? 'Hide' : 'Show'}</Text>
                 </Pressable>
               </View>
+
+              {formFields}
 
               {error !== '' && (
                 <View accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.errorBox}>

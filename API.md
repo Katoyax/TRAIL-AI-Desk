@@ -188,7 +188,7 @@ Operations that are internal background functions are not necessarily public HTT
 4. Determine the user's backend-authoritative role.
 5. Return an appropriate authenticated result or non-sensitive failure.
 
-The precise credential fields, transport format, session mechanism, and account provisioning flow remain unapproved details.
+Current code evidence establishes JSON email/password login, opaque bearer sessions stored by hash, and backend-authoritative Student, Admin, and `knowledge_manager` roles. Staff Login supplies an expected Admin or Knowledge-Base Manager role; a mismatch receives the same generic credential failure before a session is created. Student Login remains email/password based and does not supply a staff role.
 
 **Failure conditions**
 
@@ -202,9 +202,9 @@ A database outage must not be misleadingly presented as invalid credentials.
 
 ### AC-02 — Password recovery
 
-The conceptual contract must support secure account recovery and appropriate token or equivalent mechanism expiry, invalidation, and replay prevention.
+The implemented public recovery contract keeps the response generic and records deduplicated assistance metadata only for eligible active Students. It does not issue credentials or require email delivery. After approved identity verification, an Admin may atomically replace the Student password with a random one-time temporary credential; `credentialVersion` revokes prior sessions and `mustChangePassword` restricts the next Student session until the credential is replaced.
 
-The exact email or recovery-delivery integration requires later verification.
+Live provider delivery remains operationally unverified in this checkpoint.
 
 ### AC-03 — Logout
 
@@ -225,9 +225,11 @@ Authorization must be based on authenticated identity and backend-controlled per
 
 ### AC-08 — Administrative account action
 
-Potential operations include approved account provisioning, role assignment, or other authorized administration.
+Implemented Admin-only account operations include bounded Knowledge-Base Manager listing and provisioning at `GET/POST /api/admin/kb-managers`, plus lifecycle changes at `PATCH /api/admin/kb-managers/:id/status`. Creation accepts only `name` and `email`, fixes `role: knowledge_manager`, returns a cryptographically random temporary password once, and stores only its salted-scrypt hash. Status transitions increment `credentialVersion` so prior sessions fail subsequent authorization.
 
-The exact account-management capabilities must be explicitly specified before implementation.
+The `/api/knowledge-manager/sources` route family requires the exact Knowledge-Base Manager role. It provides protected catalog/detail reads, manual office-information draft creation, creator-only versioned editing, safe version history, and submission for review. It does not authorize approval, rejection, publication, archival, refresh, chunking, or indexing. Admin-only and Knowledge-Base Manager-only route families perform independent backend role checks.
+
+The final independent-review decision and publication contracts remain future work and must enforce submitter/reviewer separation before activation.
 
 ### Mandatory controls
 
@@ -247,6 +249,38 @@ The existence of an Admin user does not authorize unrestricted changes to all ac
 - Role-change permissions.
 - Session revocation behavior.
 - Administrative audit requirements.
+
+### Implemented Student account-management contract
+
+The following routes were implemented under `P01A-ADMIN-STUDENT-PROVISION-01` and are guarded by `requireAdmin()` before the operation runs:
+
+| Method and path | Request | Successful response | Persistence behavior |
+|---|---|---|---|
+| `GET /api/admin/students` | No request body | `200` with `items` containing only `id`, `name`, `studentIdNumber`, `email`, `role`, `active`, `mustChangePassword`, and `createdAt` | Reads at most 100 `role: student` records using an explicit projection and deterministic order |
+| `POST /api/admin/students` | JSON object containing only `name`, `studentIdNumber`, and `email` | `201` with the public Student account and a generated `initialPassword` returned once | Reuses `provisionUser()`; inserts one Student account with an embedded Student profile, a salted scrypt password hash, and `mustChangePassword: true` |
+| `PATCH /api/admin/students/:id/status` | JSON object containing only Boolean `active` | `200` with the safe public Student account | Student UUID target only; real transitions update `active` and increment `credentialVersion`; repeated same-state requests are idempotent |
+| `POST /api/auth/change-initial-password` | Authenticated Student bearer session plus `currentPassword`, `password`, and `confirmPassword` | `200` after atomic replacement; the client signs out and requires a fresh login | Active newly provisioned Students only; increments `credentialVersion` to invalidate all temporary-password sessions |
+
+The provisioning contract rejects client-supplied roles and other fields, fixes the role to `student`, normalizes email through the existing provisioning service, preserves the unique-email constraint, and adds a partial unique Student ID index. Student IDs are opaque strings of 1â€“50 characters in this checkpoint so leading zeros are retained; an institutional format decision remains open. Duplicate email and Student ID conflicts map to sanitized `409` responses. Unexpected storage failures remain sanitized. The initial password is not logged or stored as plaintext.
+
+Login remains email based. A Student whose response contains `mustChangePassword: true` may inspect the session through `/api/auth/me` only so the frontend can route to the change screen; ordinary authenticated authorization rejects that session until the password is replaced. Existing accounts without the flag are unaffected.
+
+Current local evidence on 2026-11-19: focused authentication tests passed 35/35 and the complete direct backend runner passed 97/97. These tests used in-memory/fake stores and did not change an Atlas account or establish live lifecycle behavior.
+
+### Implemented Student password-assistance contract
+
+The following operations are guarded by `requireAdmin()`:
+
+| Method and path | Request | Successful response | Security behavior |
+|---|---|---|---|
+| `POST /api/admin/students/:id/reset-password` | No alternate email or password input | `200` only after the configured sender accepts a reset email for the Student registered address | Active Student target only; account cooldown and Admin request-rate limit; no token or URL returned |
+| `GET /api/admin/password-requests` | No body | Bounded ordered `items` plus the real `pendingCount` | Safe request and Student identity fields only |
+| `POST /api/admin/password-requests/:id/approve-reset` | Exactly `{ "identityVerified": true }` | Handled request plus a random temporary password returned once | Admin-only; active Student and pending request required; MongoDB transaction updates credential and request together; increments `credentialVersion`; sets `mustChangePassword: true` |
+| `PATCH /api/admin/password-requests/:id` | Exactly `{ "status": "dismissed" }` | Updated safe request | Dismissal never changes credentials; arbitrary or manual `handled` status injection is rejected |
+
+`POST /api/auth/forgot-password` records a pending assistance request only for an eligible active Student and returns the same generic public response for eligible, ineligible, and unknown emails. It does not require email-provider configuration, issue a reset token, or send email. Repeated pending Student requests are deduplicated. Reset-token and email issuance remain a separate Admin-authorized operation with the existing atomic per-account cooldown.
+
+The public Forgot Password route has a dedicated fixed-window limit of 40 requests per 15 minutes for each socket IP. It does not consume the separate 20-request-per-15-minute bucket used by other `/api/auth/*` operations. The general API limit of 120 requests per minute remains active for every route. All Forgot Password submissions count regardless of eligibility or outcome, submitted email changes do not select a new bucket, and unverified `X-Forwarded-For` values are ignored. A limited response remains generic and includes `Retry-After` calculated from the current window's remaining whole seconds.
 
 ## 9. Student information retrieval contract
 
@@ -834,4 +868,10 @@ ChatGPT may assist with planning, drafting, and evidence review.
 Codex may inspect or modify the local repository only under explicit, bounded authorization.
 
 Preparation or acceptance of this document authorizes no work by itself. Phase 01A backend changes, database troubleshooting, and API execution must remain within an explicit owner-authorized scope; one approved execution batch may cover all listed files and checks.
+
+## P01B-KNOWLEDGE-SOURCE-MANAGEMENT-01 implementation evidence (2026-11-20)
+
+Authenticated `knowledge_manager` accounts now have protected source-management contracts: `GET/POST /api/knowledge-manager/sources`, `GET/PATCH /api/knowledge-manager/sources/:id`, `GET /api/knowledge-manager/sources/:id/versions`, and `POST /api/knowledge-manager/sources/:id/submit`. The implemented creation format is deliberately limited to `office_verified_information`; it requires a title, issuing office, readable content, and an allowlisted official supporting-reference URL. Mutations require the source creator, while Admins, Students, demo identities, inactive users, and unauthenticated callers are rejected by the existing backend role/session guard.
+
+Creation and edits produce non-public immutable draft versions. Submission changes only `draftStatus` to `pending_review` and records submitter/timing metadata; it does not approve, publish, chunk, embed, or activate content. Approval, rejection, reviewer assignment, and publication endpoints remain unimplemented.
 

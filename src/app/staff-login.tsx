@@ -1,8 +1,9 @@
 
 import { Redirect, router } from 'expo-router';
 import { useRef, useState } from 'react';
-import { TextInput } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { LoginLayout } from '../components/login-layout';
+import { Brand } from '../constants/brand';
 import {
   hasConfiguredApi,
   signIn,
@@ -18,6 +19,8 @@ export default function StaffLoginScreen() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [selectedRole, setSelectedRole] = useState<'admin' | 'knowledge_manager'>('admin');
+  const [roleMenuOpen, setRoleMenuOpen] = useState(false);
 
   const handleSignIn = async () => {
     if (loading) return;
@@ -45,7 +48,7 @@ export default function StaffLoginScreen() {
 
     try {
       await signIn(email, password, {
-        requiredRole: 'admin',
+        requiredRole: selectedRole,
       });
 
       // Remove the password from the form after successful login.
@@ -61,9 +64,15 @@ export default function StaffLoginScreen() {
     }
   };
 
-  // Admins enter the protected Admin workspace.
+  // Each backend-confirmed staff role enters only its own protected workspace.
   if (session?.user.role === 'admin' && !session.demo) {
     return <Redirect href="/admin-dashboard" />;
+  }
+
+  if (session?.user.role === 'knowledge_manager' && !session.demo) {
+    return session.user.mustChangePassword
+      ? <Redirect href="/change-initial-password" />
+      : <Redirect href="/kb-manager-dashboard" />;
   }
 
   // Existing student sessions remain in the student workspace.
@@ -76,6 +85,53 @@ export default function StaffLoginScreen() {
       portalLabel="STAFF PORTAL"
       title="Admin & Knowledge-Base Manager Login"
       description="Access for authorized university staff."
+      preFormFields={(
+        <View style={styles.roleField}>
+          <Text nativeID="staff-login-role-label" style={styles.label}>Login as</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Login as"
+            accessibilityHint="Choose Admin or Knowledge-Base Manager"
+            accessibilityState={{ expanded: roleMenuOpen, disabled: loading }}
+            disabled={loading}
+            onPress={() => setRoleMenuOpen((open) => !open)}
+            style={({ pressed }) => [styles.selector, pressed && styles.pressed]}
+          >
+            <Text style={styles.selectorText}>
+              {selectedRole === 'admin' ? 'Admin' : 'Knowledge-Base Manager'}
+            </Text>
+            <Text aria-hidden style={styles.chevron}>{roleMenuOpen ? '▲' : '▼'}</Text>
+          </Pressable>
+          {roleMenuOpen && (
+            <View accessibilityRole="radiogroup" style={styles.roleMenu}>
+              {([
+                ['admin', 'Admin'],
+                ['knowledge_manager', 'Knowledge-Base Manager'],
+              ] as const).map(([value, label]) => (
+                <Pressable
+                  key={value}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: selectedRole === value }}
+                  onPress={() => {
+                    setSelectedRole(value);
+                    setRoleMenuOpen(false);
+                    setError('');
+                  }}
+                  style={({ pressed }) => [
+                    styles.roleOption,
+                    selectedRole === value && styles.roleOptionSelected,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text style={[styles.roleOptionText, selectedRole === value && styles.roleOptionTextSelected]}>
+                    {label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          )}
+        </View>
+      )}
       email={email}
       password={password}
       onEmailChange={(value) => {
@@ -106,3 +162,17 @@ export default function StaffLoginScreen() {
     />
   );
 }
+
+const styles = StyleSheet.create({
+  roleField: { marginBottom: 16 },
+  label: { color: Brand.ink, fontSize: 15, lineHeight: 22, fontWeight: '600', marginBottom: 9 },
+  selector: { minHeight: 54, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderColor: Brand.inputBorder, borderRadius: 10, paddingHorizontal: 15, backgroundColor: Brand.surface },
+  selectorText: { color: Brand.ink, fontSize: 16, fontWeight: '600' },
+  chevron: { color: Brand.blue, fontSize: 13 },
+  roleMenu: { borderWidth: 1, borderColor: Brand.line, borderRadius: 10, marginTop: 6, overflow: 'hidden', backgroundColor: Brand.surface },
+  roleOption: { minHeight: 48, justifyContent: 'center', paddingHorizontal: 15, borderBottomWidth: 1, borderBottomColor: Brand.line },
+  roleOptionSelected: { backgroundColor: Brand.pale },
+  roleOptionText: { color: Brand.ink, fontSize: 15 },
+  roleOptionTextSelected: { color: Brand.navy, fontWeight: '800' },
+  pressed: { opacity: 0.76 },
+});

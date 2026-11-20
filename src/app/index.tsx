@@ -45,7 +45,9 @@ export default function LoginScreen() {
           setError('Demo details have changed. Choose Demo Profile again to restore them.');
         }
       } else {
-        await signIn(email, password);
+        await signIn(email, password, {
+        requiredRole: 'student',
+      });
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to sign in. Please try again.');
@@ -60,6 +62,8 @@ export default function LoginScreen() {
       href={
         session.user.role === 'admin' && !session.demo
           ? '/admin-dashboard'
+          : session.user.mustChangePassword && !session.demo
+            ? '/change-initial-password'
           : '/dashboard'
       }
     />

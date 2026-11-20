@@ -171,14 +171,35 @@ Persistence must support reliable server-side evaluation of a user's authorized 
 
 The Knowledge-Base Manager cannot merely be an Admin label displayed in the frontend.
 
-### Open design questions
+### Current implemented three-role account records
 
-- Exact user record structure.
+Current source evidence uses the `users` and `authSessions` collections in the validated `trail_db` target.
+
+The implemented `users` account shape includes `id`, normalized `email`, `name`, `role`, salted-scrypt `passwordHash`, `active`, `credentialVersion`, and `createdAt`, with optional password-recovery fields. The canonical third-role value is `knowledge_manager`; it uses the same account document and credential fields rather than a separate profile or authentication collection. Newly provisioned Students also receive the embedded `studentProfile.studentIdNumber` string. Newly provisioned Students and Knowledge-Base Managers receive `mustChangePassword: true`. Existing account and session references continue to use `users.id`. Role-specific list queries return at most 100 records with explicit safe projections.
+
+The `authSessions` shape stores a SHA-256 bearer-token hash, `userId`, `credentialVersion`, `createdAt`, and `expiresAt`. The plaintext bearer token and generated initial Student password are not stored by these paths.
+
+Unique indexes on `users.id` and `users.email` protect account identity and duplicate email registration. A partial unique index on `users.studentProfile.studentIdNumber` enforces uniqueness for records that contain a string value while allowing existing accounts without that field to remain unchanged. A TTL index on `authSessions.expiresAt` provides cleanup while authentication still performs an explicit expiry check.
+
+Completing the initial password change for a Student or Knowledge-Base Manager atomically replaces the salted-scrypt hash, clears `mustChangePassword`, records `passwordChangedAt`, and increments `credentialVersion`. The version increment invalidates every session created with the temporary credential. Successful Student completion through the existing password-reset flow also clears the initial-change requirement.
+
+Admin-controlled Student deactivation and reactivation reuse the existing `active` field. A real status transition changes only `active` and increments `credentialVersion`, invalidating all earlier sessions without deleting them. The UUID, Student ID, email, password hash, and `mustChangePassword` value remain unchanged. Repeated requests for the current state are idempotent and do not increment the version again; inactive records continue reserving their unique email and Student ID.
+
+Admin-controlled Knowledge-Base Manager deactivation and reactivation follow the same non-destructive `active`/`credentialVersion` pattern while filtering strictly on `role: knowledge_manager`. The original UUID, email, password hash, and pending initial-password requirement are preserved, and unique email registration continues to reserve inactive accounts.
+
+The implemented `passwordResetRequests` collection stores only assistance metadata: `id`, `studentId`, `requestedAt`, `status`, a retention-expiry timestamp, and resolution metadata. Student name and email are read from the authorized `users` record for the Admin response; plaintext temporary passwords, password hashes, reset tokens, and token hashes are not copied into this collection.
+
+Admin approval uses one MongoDB transaction across `users` and `passwordResetRequests`. The transaction requires a pending request and an active Student, replaces the salted-scrypt password hash, sets `mustChangePassword: true`, increments `credentialVersion`, clears any older reset-token fields, and then marks the request handled. A failure aborts both writes, while dismissal changes only request metadata.
+
+Indexes provide unique request IDs, deterministic request ordering, one pending record per Student, and TTL deletion using `retentionExpiresAt`. New records use the bounded `PASSWORD_RESET_REQUEST_RETENTION_DAYS` configuration with a 30-day default and an accepted range of 1–365 days. Exact institutional retention approval remains an operational governance requirement.
+
+### Remaining open design questions
+
 - Whether and how account identifiers connect to university identity systems.
-- Session-storage approach.
-- Token and recovery-record lifecycle.
 - Role-change audit requirements.
-- Provisioning and credential-recovery procedures.
+- Knowledge-Base Manager audit policy and the final permission matrix for source mutations.
+- Institution-approved Student ID format and validation policy; this checkpoint treats the value as a required opaque string of 1â€“50 characters and preserves leading zeros.
+- Controlled adoption or backfill policy for existing Student accounts without Student IDs; no automatic backfill is implemented.
 
 No integration with confidential university student-record systems is authorized or assumed.
 
@@ -711,4 +732,10 @@ ChatGPT may prepare documentation and review evidence.
 Codex may perform local repository operations only within separately approved checkpoint boundaries.
 
 This document authorizes no work by itself. Phase 01A troubleshooting, database connections, schema or index changes, migrations, and application-code modifications must remain inside an explicit owner-authorized scope; once approved, that coordinated scope does not require artificial per-file approval.
+
+## P01B-KNOWLEDGE-SOURCE-MANAGEMENT-01 implemented draft model (2026-11-20)
+
+Manager source preparation reuses `knowledge_sources` and `knowledge_versions`; no new collection was introduced. `knowledge_sources.activeVersion` remains the approved/public pointer. A separate `draftVersion`, `draftVersionNumber`, and `draftStatus` (`draft` or `pending_review`) track non-public manager work, while `createdBy`, `submittedBy`, `submittedAt`, `supportingReferenceUrl`, `revision`, and timestamps preserve ownership, provenance, and optimistic concurrency evidence. The compound manager-workspace index is `{ createdBy: 1, draftStatus: 1, lastUpdated: -1 }`.
+
+Draft `knowledge_versions` retain immutable content, hash, version number, creator, and draft/review status. Draft creation and editing do not create `knowledge_chunks` or embeddings. Consequently, `activeVersion` and its version number remain stable when a verified source receives a new draft, and the existing verified version can remain eligible until a separately authorized review/publication transition occurs.
 

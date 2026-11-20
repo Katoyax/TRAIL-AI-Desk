@@ -1,7 +1,13 @@
 import { useSyncExternalStore } from 'react';
 import { apiRequest, apiUrl } from './api';
 
-export type SessionUser = { id: string; name: string; email: string; role: 'student' | 'admin' };
+export type SessionUser = {
+  id: string;
+  name: string;
+  email: string;
+  role: 'student' | 'admin' | 'knowledge_manager';
+  mustChangePassword?: boolean;
+};
 export type Session = { user: SessionUser; token?: string; expiresAt?: string; demo: boolean };
 let session: Session | null = null;
 const listeners = new Set<() => void>();
@@ -28,7 +34,7 @@ export const validEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e
 export async function signIn(
   email: string,
   password: string,
-  options: { requiredRole?: 'admin' } = {},
+  options: { requiredRole?: 'student' | 'admin' | 'knowledge_manager' } = {},
 ) {
   const result = await apiRequest<{
     token: string;
@@ -39,13 +45,14 @@ export async function signIn(
     body: {
       email: email.trim().toLowerCase(),
       password,
+      ...(options.requiredRole ? { role: options.requiredRole } : {}),
     },
   });
 
   if (
     !result.token ||
     !result.user?.id ||
-    !['student', 'admin'].includes(result.user.role)
+    !['student', 'admin', 'knowledge_manager'].includes(result.user.role)
   ) {
     // Revoke any token returned in a malformed response.
     if (result.token) {
@@ -58,7 +65,7 @@ export async function signIn(
     throw new Error('Invalid sign-in response.');
   }
 
-  // Staff Login currently accepts Admin accounts only.
+  // Revoke a valid token if the server response does not match the selected portal role.
   if (
     options.requiredRole &&
     result.user.role !== options.requiredRole
@@ -92,6 +99,22 @@ export async function forgotPassword(email: string) {
 
 export async function resetPassword(token: string, password: string, confirmPassword: string) {
   const result = await apiRequest<{ message: string }>('/api/auth/reset-password', { method: 'POST', body: { token, password, confirmPassword } });
+  signOut();
+  return result;
+}
+
+// Replaces a newly provisioned Student or manager temporary password and clears the restricted session locally.
+export async function changeInitialPassword(currentPassword: string, password: string, confirmPassword: string) {
+  if (!session?.token || session.demo ||
+      !['student', 'knowledge_manager'].includes(session.user.role) ||
+      !session.user.mustChangePassword) {
+    throw new Error('Sign in with an account that requires a password change.');
+  }
+  const result = await apiRequest<{ message: string }>('/api/auth/change-initial-password', {
+    method: 'POST',
+    token: session.token,
+    body: { currentPassword, password, confirmPassword },
+  });
   signOut();
   return result;
 }

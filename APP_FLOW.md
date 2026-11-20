@@ -115,15 +115,15 @@ No role should be inferred from an untrusted frontend preference or silently def
 - An unknown or unauthorized role must not receive privileged access.
 - Duplicate login submissions should not create contradictory UI states.
 
-**Evidence status:** Historical authentication and frontend navigation paths exist; live database-backed authentication and three-role enforcement are unverified.
+**Evidence status:** Current code and local tests establish authentication and exact backend guards for Student, Admin, and Knowledge-Base Manager accounts. The owner separately reports successful live Admin authentication. Knowledge-Base Manager live persistence and rendered UI behavior were not exercised in this checkpoint.
 
-#### Current UI-only staff entry
+#### Current Staff entry
 
-**Status:** UI IMPLEMENTED — AUTHENTICATION NOT INTEGRATED
+**Status:** ADMIN AND KNOWLEDGE-BASE MANAGER AUTHENTICATION INTEGRATED AND LOCALLY TESTED
 
-The public `/` Student Login and `/staff-login` Staff Login provide two-way in-app navigation. The Staff Login presents the shared Admin and Knowledge-Base Manager credential interface, but its Sign In control is disabled and performs no authentication, API request, session creation, role resolution, or privileged navigation.
+The public `/` Student Login and `/staff-login` Staff Login provide two-way in-app navigation. Staff Login offers exactly Admin and Knowledge-Base Manager selections. The selected expected role is validated by the backend before session creation: Admin enters `/admin-dashboard`, Knowledge-Base Manager enters `/kb-manager-dashboard`, and mismatched or Student accounts receive a generic authentication failure without a staff session.
 
-This is source-level presentation and navigation evidence only. The local web preview was not available during this checkpoint because no active Node.js version was configured, so rendered navigation remains unverified. This implementation does not establish the approved login sequence, backend role enforcement, or operational Admin or Knowledge-Base Manager access.
+Newly provisioned Knowledge-Base Managers must replace the temporary password before their dashboard route becomes available. Frontend protected routes complement exact-role backend guards and do not grant API permission by themselves.
 
 ### 5.2 Password recovery
 
@@ -137,9 +137,9 @@ The target includes:
 4. The backend enforces token or equivalent recovery validity, expiry, and reuse prevention.
 5. The user receives an accurate completion or failure message.
 
-The exact recovery delivery method and screens require current verification and approved technical design.
+The current public flow returns a generic response and creates a deduplicated pending assistance notification only for an eligible active Student. It does not issue a reset token or require email delivery. The notification is visible only through Admin-protected operations and does not prove requester identity.
 
-The interface must not expose sensitive account information unnecessarily.
+An Admin may initiate a reset only for an active Student account. The backend uses the registered address, applies cooldown/rate controls, and reports success only after the configured sender accepts the email. The Admin never receives the token or reset URL.
 
 ### 5.3 Logout and session expiry
 
@@ -306,7 +306,32 @@ Proposed Admin-facing workflows include:
 - Manual institutional entry submission.
 - Viewing permitted source status and operational information.
 
-The exact Admin navigation, account-management permissions, and operational dashboards are still open implementation/design details.
+The Admin Dashboard now links to `/student-management` for the approved Student-account subset. Other account-management permissions and operational modules remain open.
+
+### 10.1 Implemented Student provisioning sequence
+
+1. A real authenticated Admin opens `/student-management` from `/admin-dashboard`.
+2. The screen loads up to 100 existing Student accounts through protected `GET /api/admin/students`.
+3. The Admin enters an approved name, Student ID Number, and registered email.
+4. Protected `POST /api/admin/students` accepts only those fields, assigns `role: student`, preserves the internal UUID, and stores the Student ID in an embedded profile.
+5. The backend generates an initial password, reuses the existing secure provisioning service, and returns the identity summary and password once after confirmed insertion.
+6. The UI hides the password by default, supports explicit reveal/copy controls, and instructs the Admin to deliver it privately.
+7. The new Student uses the existing email-based Student Login and is routed to `/change-initial-password`.
+8. The backend verifies the current temporary password, stores only the new salted-scrypt hash, clears the initial-change flag, and increments `credentialVersion` so every temporary-password session is invalid.
+9. The Student signs in again with the new password and may enter the ordinary Student route group.
+
+An ambiguous network failure is not automatically retried; the Admin is instructed to refresh the list before another attempt. Existing Students without a Student ID or initial-change flag are not automatically modified. Public self-registration remains disabled, and Student ID-based login remains a separate future checkpoint.
+
+### 10.2 Implemented password-assistance sequence
+
+1. A Student submits the existing generic Forgot Password form.
+2. For an eligible active Student account, the backend deduplicates a pending internal assistance record without issuing a reset token, requiring email delivery, or changing the generic public response.
+3. A real Admin sees the backend-derived pending count on `/admin-dashboard` and opens `/password-requests`.
+4. After completing the approved identity-verification procedure, the Admin confirms verification and approves the pending request.
+5. One transaction replaces only the active Student credential, sets the mandatory-change flag, increments `credentialVersion`, and marks the request handled. A random temporary password is returned once to the Admin for approved private delivery.
+6. The Student signs in with the temporary password, is restricted to `/change-initial-password`, and must replace it before using normal Student features.
+
+Neither a pending record nor knowledge of the registered email is proof of identity. Dismissal does not modify credentials, and manual status changes cannot mark a request handled.
 
 Admin submission of institutional content does not replace independent Knowledge-Base Manager approval.
 
@@ -317,6 +342,8 @@ Any previous Admin-oriented interface that allows direct approval must be reconc
 **Relevant requirements:** FR-003, FR-024, FR-030–FR-035; D-002–D-006, D-010.
 
 The Knowledge-Base Manager must authenticate using a separately enforced role.
+
+The implemented foundation provides a protected dashboard with real source-status totals and a manager-only source-list operation. Submission, independent approval, rejection, archival, refresh, and other source mutations remain unavailable through this manager route until the governed workflow below is implemented.
 
 ### Independent review sequence
 
@@ -540,4 +567,13 @@ Do not replace original requirements with inferred interface behavior.
 The project owner retains authority over scope, design, implementation, repository actions, acceptance, and phase advancement.
 
 Preparation or acceptance of this document authorizes no work by itself. Phase 01A commands, inspections, edits, and database operations must remain within an explicit owner-authorized scope; an approved coordinated batch may cover its internal files and checks.
+
+## Implemented manager source-preparation flow (P01B-KNOWLEDGE-SOURCE-MANAGEMENT-01)
+
+1. An authenticated Knowledge-Base Manager opens the protected dashboard and selects **Manage knowledge sources**.
+2. The manager may view genuine protected source metadata and version history.
+3. The manager creates a manual office-information draft with issuing-office provenance and an official supporting reference, or edits an eligible source they created.
+4. Every save creates a new immutable draft version; any existing approved active version is retained.
+5. **Submit for review** requires confirmation and changes the draft to `pending_review`.
+6. Submission locks that draft but does not approve, publish, index, or expose it to Student retrieval. Independent review remains a separate future checkpoint.
 

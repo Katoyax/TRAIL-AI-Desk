@@ -45,18 +45,63 @@ Historical P00-C S/P/G/C/U classifications, where available, remain separate his
 |---|---:|---|---|---|
 | FR-001 | 7 | The system shall allow registered users to log in using valid credentials. | Partial Evidence — historical authentication and frontend login paths | Real MongoDB-backed login, invalid credentials, disabled accounts, session behavior |
 | FR-002 | 7 | The system shall provide secure password recovery for registered users. | Partial Evidence — reset-token and password-security mechanisms historically inspected | Live reset, expiry, reuse prevention, session revocation, email delivery |
-| FR-003 | 7 | The system shall restrict protected features according to user roles. | Potential Conflict — separate Knowledge-Base Manager enforcement not established | Backend authorization for all three distinct roles |
+| FR-003 | 7 | The system shall restrict protected features according to user roles. | Partial Evidence — exact Student, Admin, and Knowledge-Base Manager authentication/route guards locally tested | Live three-role authorization and full knowledge-workflow permission tests |
 | FR-004 | 7 | The system shall display a dashboard with navigation to available student features. | Partial Evidence — historical dashboard and navigation paths | Dashboard, navigation, usability, and accessibility testing |
 | FR-005 | 7 | The system shall allow authenticated users to log out. | Partial Evidence — historical logout; potential pending-login race | Logout, token invalidation, stale-response handling, session-expiry tests |
 
-**Current bounded UI evidence — Staff Login checkpoint**
+**Historical bounded UI evidence — initial Staff Login UI checkpoint**
 
 - `src/app/staff-login.tsx` provides the shared Staff Login presentation.
 - `src/app/index.tsx` and `/staff-login` define two-way Student/Staff entry navigation.
-- The Staff Sign In control is intentionally disabled and performs no authentication or session operation.
-- This adds partial source-level UI evidence relevant to FR-001 and FR-003 but does not satisfy registered-user staff login or three-role authorization.
-- FR-001 remains Partial Evidence, and FR-003 remains Potential Conflict until backend-enforced Admin and Knowledge-Base Manager authentication is implemented and verified.
+- At that checkpoint, the Staff Sign In control was intentionally disabled and performed no authentication or session operation.
+- That checkpoint added partial source-level UI evidence but did not satisfy registered-user staff login or three-role authorization; the later P01B foundation evidence below supersedes those current-state limitations.
 - Runtime rendering, responsive behavior, and navigation remain unverified because the authorized web-preview command could not start without an active Node.js version.
+
+**Current implementation evidence — P01A-ADMIN-STUDENT-PROVISION-01 (2026-11-11)**
+
+- `server/src/app.mjs`, `server/src/auth/service.mjs`, and `server/src/auth/store.mjs` implement Admin-protected Student listing and provisioning while fixing the created role to `student`.
+- `src/app/student-management.tsx` and `src/services/students.ts` implement the protected Admin workflow; `src/app/_layout.tsx` registers it inside the real, non-demo Admin route group.
+- Focused authentication tests passed 27/27, the direct TypeScript check passed, focused ESLint passed, and the full local backend runner passed 89/89.
+- Tests used in-memory/fake persistence. No live Student account was created, so Atlas persistence and the complete manual UI flow remain unverified in this checkpoint.
+- At that checkpoint, FR-001 and FR-024 gained code/test evidence for controlled Student provisioning and subsequent login capability; the distinct manager-role gap was addressed later by the P01B foundation evidence below.
+
+**Current implementation evidence — P01B-KB-MANAGER-FOUNDATION-01 (2026-11-20)**
+
+- The existing User/session architecture now recognizes canonical `knowledge_manager` accounts, with Admin-only provisioning/lifecycle operations, salted-scrypt credentials, mandatory initial password replacement, and `credentialVersion` revocation.
+- Staff Login supplies an exact expected staff role; mismatch is rejected before session creation. Expo protected routes and backend `requireRole()` guards isolate Student, Admin, and Knowledge-Base Manager destinations and APIs.
+- The manager dashboard reads actual protected source status but exposes no manager source mutations; independent review, submitter separation, and final governance controls remain unimplemented.
+- Focused authentication tests passed 47/47, the complete backend runner passed 109/109, TypeScript passed, and focused ESLint passed. No live Atlas record or rendered device/browser flow was exercised.
+
+**Current implementation evidence â€” P01A-STUDENT-PROVISIONING-04 (2026-11-19)**
+
+- Admin provisioning now requires a Student ID Number, stores it as an embedded Student-profile string under the existing UUID User identity, and enforces uniqueness with a partial MongoDB index. Existing records are not automatically backfilled.
+- Newly provisioned Students retain email-based login but receive a backend-enforced initial-password-change restriction. Atomic completion replaces the salted-scrypt hash and increments `credentialVersion`, invalidating all temporary-password sessions.
+- The Admin UI presents the approved identity fields and generated password once in component state with reveal/hide/copy controls; password values remain excluded from list responses and database documents.
+- Focused authentication tests passed 32/32, the complete backend runner passed 94/94, TypeScript passed, and focused ESLint passed. No live Atlas record or rendered device/browser flow was exercised.
+- This strengthens code/test evidence for FR-001, FR-002, FR-024, and NFR-007. Student ID-based login and the institution-approved Student ID format remain proposed decisions, not implemented requirements.
+
+**Current implementation evidence — P01A-ADMIN-PASSWORD-MANAGEMENT-03 (2026-11-11)**
+
+- The existing self-service reset path now also records deduplicated Student assistance metadata while preserving generic public responses and non-blocking delivery.
+- Admin-protected endpoints support Student-only reset initiation, bounded safe request listing, and pending-to-handled/dismissed management. The registered account email remains authoritative.
+- `/student-management`, `/password-requests`, `/admin-dashboard`, and the existing Admin protected route group expose the bounded recovery-assistance UI without tokens or passwords.
+- Focused authentication tests passed 31/31, TypeScript and focused ESLint passed, and the full backend runner passed 93/93 using fake/in-memory dependencies.
+- This adds current implementation/test evidence for FR-002 and backend Admin enforcement under FR-003. Live email delivery and Atlas request persistence were not executed, and three-role RBAC remains incomplete.
+
+**Current implementation evidence — P01A-FORGOT-PASSWORD-REQUEST-UI-01 (2026-11-19)**
+
+- The public Forgot Password operation now records only a deduplicated assistance request for an eligible active Student; it no longer requires configured email delivery or issues a reset token.
+- Eligible, inactive, Staff, and unknown email submissions receive the same generic response, while only the eligible active Student produces an Admin-visible pending record.
+- Focused authentication tests passed 35/35, TypeScript passed, and focused ESLint passed using local in-memory/fake dependencies. No live Atlas request or real email was performed.
+- Admin-authorized reset-link delivery remains a separate operation. This updates implementation/test evidence for FR-002 without claiming automatic recovery approval or identity verification.
+
+**Current implementation evidence — P01A-FORGOT-PASSWORD-ADMIN-RESET-02 (2026-11-19)**
+
+- An authenticated Admin can approve a pending eligible Student request only after explicitly confirming an approved identity-verification procedure.
+- One MongoDB transaction replaces the salted-scrypt credential, sets `mustChangePassword: true`, increments `credentialVersion`, and marks the request handled. Dismissal leaves the credential unchanged.
+- The random temporary password is returned only in the successful approval response and is excluded from request listing/status APIs and persistence. The Admin UI hides it by default and provides reveal, copy, and clear controls.
+- Focused authentication tests passed 41/41 and the complete backend runner passed 102/102; TypeScript and focused ESLint passed except for the pre-existing `Buffer` global lint finding in `server/src/app.mjs`. No live Atlas transaction or rendered UI test occurred.
+- This strengthens local implementation/test evidence for FR-002, FR-003, and NFR-007 without establishing live operational acceptance or three-role RBAC completion.
 
 ### 3.2 AI Chatbot and Context-Aware Responses — FR-006–FR-012
 
@@ -95,7 +140,7 @@ Historical P00-C S/P/G/C/U classifications, where available, remain separate his
 
 | ID | SRS page | Original SRS requirement | Historical evidence assessment | Future verification |
 |---|---:|---|---|---|
-| FR-024 | 10 | The system shall provide an administrative interface accessible only to authorized users. | Partial Evidence — historical Admin interface and backend authorization | Three-role authorization and protected-route tests |
+| FR-024 | 10 | The system shall provide an administrative interface accessible only to authorized users. | Partial Evidence — Admin and Knowledge-Base Manager dashboards and exact role guards locally tested | Live role acceptance and full governed management workflow |
 | FR-025 | 10 | The system shall allow administrators to register approved official university webpages as information sources. | Partial Evidence — historical source registration | Source validation, provenance, submission and approval lifecycle |
 | FR-026 | 10 | The system shall retrieve and process publicly accessible information from registered university webpages, subject to permitted access. | Partial Evidence — extraction and URL/SSRF safeguards | Permitted access, extraction, and real-source validation |
 | FR-027 | 10 | The system shall allow administrators to upload institutional documents for knowledge-base processing. | Partial Evidence — historical upload paths | Supported formats, provenance, staging, approval-first external processing |
@@ -233,4 +278,11 @@ The original traceability baseline was prepared under P00-E3G. This recovered fi
 Updates are triggered by an approved requirement clarification, decision, verified implementation change, executed test, accepted milestone, or corrected evidence classification. Every update must preserve the original SRS wording and IDs, identify its evidence, and synchronize material effects with `DECISIONS.md`, `CHANGE_REQUESTS.md`, `IMPLEMENTATION.md`, and `TESTING.md`.
 
 ChatGPT or Codex may prepare authorized traceability updates. The project owner retains final authority over scope, requirement interpretation, architectural decisions, acceptance, and phase advancement. Completion means all 48 primary entries remain present, links and classifications are supportable, and no implementation or test status is overstated.
+
+## Current implementation evidence — P01B-KNOWLEDGE-SOURCE-MANAGEMENT-01 (2026-11-20)
+
+- FR-003 and FR-030 gain code/test evidence for a distinct backend-authorized `knowledge_manager` source workspace; Admin and Student accounts are denied manager-only routes.
+- FR-031–FR-035 and NFR-012 gain partial evidence for creator-attributed source/version drafts, official supporting references, immutable version history, and a submission boundary that does not equal approval or publication.
+- FR-007–FR-012 and FR-036 gain regression evidence that unapproved manager drafts create no chunks/embeddings and remain excluded from Student retrieval while existing approved content remains retrievable.
+- Independent reviewer assignment, approval/rejection decisions, publication/index activation, live Atlas persistence, and rendered UI validation remain Not Yet Verified or not implemented. The legacy Admin ingestion path's pre-review processing remains a documented conflict with the approved pre-approval provider boundary.
 

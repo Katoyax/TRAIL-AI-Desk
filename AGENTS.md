@@ -90,6 +90,13 @@ For every feature request, understand the owner's objective, consult only the re
 | Bug resolution | [BUGS.md](BUGS.md), [TESTING.md](TESTING.md), and the affected implementation specification |
 | Planning and milestones | [PROJECT_PLAN.md](PROJECT_PLAN.md), [REQUIREMENTS_TRACEABILITY.md](REQUIREMENTS_TRACEABILITY.md) |
 | Requirements or architecture changes | [DECISIONS.md](DECISIONS.md), [CHANGE_REQUESTS.md](CHANGE_REQUESTS.md), [REQUIREMENTS_TRACEABILITY.md](REQUIREMENTS_TRACEABILITY.md) |
+| All implementation code | [CODE_STYLE.md](CODE_STYLE.md) |
+
+### Code Style and Commenting
+
+All new or modified implementation code must follow the conventions in [CODE_STYLE.md](CODE_STYLE.md).
+
+Write short purpose comments above meaningful functions and components, and explain non-obvious or security-sensitive logic when necessary. Avoid redundant comments and keep existing comments accurate. This standard does not authorize repository-wide comment or formatting changes; task-specific scope and approval boundaries still control.
 
 After an authorized development checkpoint, update only materially affected documents in the same approved batch. Preserve history; distinguish planned, implemented, tested, and owner-accepted states; maintain SRS traceability; record relevant bugs, decisions, or change requests; and never convert an unexecuted test or proposed requirement into an accepted result.
 

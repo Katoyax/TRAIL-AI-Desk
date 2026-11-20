@@ -13,6 +13,7 @@ import {
 import { Brand } from '../constants/brand';
 import { apiRequest } from '../services/api';
 import { signOut, useSession } from '../services/auth';
+import { listPasswordResetRequests } from '../services/password-requests';
 
 type SourceListResponse = {
   items: unknown[];
@@ -21,6 +22,7 @@ type SourceListResponse = {
 type OverviewState = {
   token: string;
   sourceCount: number | null;
+  pendingPasswordRequests: number | null;
   error: string;
 };
 
@@ -48,20 +50,28 @@ export default function AdminDashboardScreen() {
 
     async function loadOverview() {
       try {
-        const result = await apiRequest<SourceListResponse>(
-          '/api/admin/sources',
-          { token: currentToken }
-        );
+        const [sourcesResult, requestsResult] = await Promise.allSettled([
+          apiRequest<SourceListResponse>('/api/admin/sources', { token: currentToken }),
+          listPasswordResetRequests(),
+        ]);
 
         if (!cancelled) {
+          const sourceItems = sourcesResult.status === 'fulfilled' && Array.isArray(sourcesResult.value.items)
+            ? sourcesResult.value.items
+            : null;
+          const pendingPasswordRequests = requestsResult.status === 'fulfilled' &&
+            Number.isInteger(requestsResult.value.pendingCount)
+            ? requestsResult.value.pendingCount
+            : null;
+          const errors = [
+            sourceItems === null ? 'Unable to load knowledge-base statistics.' : '',
+            pendingPasswordRequests === null ? 'Unable to load password-reset request statistics.' : '',
+          ].filter(Boolean);
           setOverview({
             token: currentToken,
-            sourceCount: Array.isArray(result.items)
-              ? result.items.length
-              : null,
-            error: Array.isArray(result.items)
-              ? ''
-              : 'The knowledge-source response is invalid.',
+            sourceCount: sourceItems?.length ?? null,
+            pendingPasswordRequests,
+            error: errors.join(' '),
           });
         }
       } catch {
@@ -69,6 +79,7 @@ export default function AdminDashboardScreen() {
           setOverview({
             token: currentToken,
             sourceCount: null,
+            pendingPasswordRequests: null,
             error: 'Unable to load knowledge-base statistics.',
           });
         }
@@ -95,6 +106,7 @@ export default function AdminDashboardScreen() {
     currentOverview === null;
 
   const sourceCount = currentOverview?.sourceCount ?? null;
+  const pendingPasswordRequests = currentOverview?.pendingPasswordRequests ?? null;
   const error = currentOverview?.error ?? '';
 
   const handleLogout = () => {
@@ -202,13 +214,63 @@ export default function AdminDashboardScreen() {
             </Text>
 
             <Text style={styles.moduleDescription}>
-              View and manage approved student and staff accounts.
-              Account-management endpoints are not implemented yet.
+              View existing Student accounts and provision approved
+              Student access through the protected Admin workflow.
             </Text>
 
-            <Text style={styles.comingSoon}>
-              Backend integration pending
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => router.push('/student-management')}
+              style={styles.moduleButton}
+            >
+              <Text style={styles.moduleButtonText}>
+                Manage Student accounts
+              </Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.moduleCard}>
+            <Text style={styles.moduleTitle}>
+              Staff Management
             </Text>
+
+            <Text style={styles.moduleDescription}>
+              Provision and manage Knowledge-Base Manager accounts without granting Admin privileges.
+            </Text>
+
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => router.push('/staff-management')}
+              style={styles.moduleButton}
+            >
+              <Text style={styles.moduleButtonText}>
+                Manage KB Managers
+              </Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.moduleCard}>
+            <Text style={styles.moduleTitle}>
+              Password Reset Requests
+            </Text>
+
+            <Text style={styles.moduleDescription}>
+              Review Student Forgot Password notifications and assist through the protected recovery workflow.
+            </Text>
+
+            <Text style={styles.pendingCount}>
+              {loading ? 'Loading…' : `${pendingPasswordRequests ?? '—'} pending`}
+            </Text>
+
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => router.push('/password-requests')}
+              style={styles.moduleButton}
+            >
+              <Text style={styles.moduleButtonText}>
+                Review password requests
+              </Text>
+            </Pressable>
           </View>
 
           <View style={styles.moduleCard}>
@@ -433,6 +495,13 @@ const styles = StyleSheet.create({
     color: Brand.muted,
     fontSize: 13,
     fontWeight: '600',
+  },
+
+  pendingCount: {
+    color: Brand.warning,
+    fontSize: 14,
+    fontWeight: '800',
+    marginBottom: 14,
   },
 
   moduleButton: {

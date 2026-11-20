@@ -789,3 +789,9 @@ Codex may inspect or modify the local repository only within separately approved
 
 Preparation or acceptance of this document does not by itself authorize RAG implementation, AI-provider calls, database operations, or work outside an owner-approved checkpoint.
 
+## Manager draft boundary implemented in P01B-KNOWLEDGE-SOURCE-MANAGEMENT-01
+
+Manager-created and manager-edited drafts are persisted only in `knowledge_sources` and `knowledge_versions`. They remain inactive, have no knowledge chunks or embeddings, and are excluded by the existing Student retrieval filters, which require an active source with `verificationStatus: verified` and use only its `activeVersion`. Submitting a draft changes only its review status; it does not activate, index, embed, or publish it. Existing approved active versions remain untouched by later drafts.
+
+The older Admin ingestion path still performs extraction/chunk preparation before its legacy verification step. Although current retrieval filters keep that pending content out of Student answers, aligning that older path with the stricter pre-approval external-provider prohibition requires a separate approval-gated ingestion refactor. This checkpoint does not broaden that legacy path to Knowledge-Base Managers.
+

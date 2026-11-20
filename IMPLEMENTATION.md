@@ -165,18 +165,50 @@ Do not mark a screen as fully implemented merely because its component exists.
 
 ### 4.4 Staff Login UI implementation
 
-**Status:** UI IMPLEMENTED — AUTHENTICATION NOT INTEGRATED
+**Status:** ADMIN AND KNOWLEDGE-BASE MANAGER AUTHENTICATION INTEGRATED; FULL KNOWLEDGE WORKFLOW NOT IMPLEMENTED
 
 The frontend now contains:
 
 - `src/app/staff-login.tsx` for the public shared Staff Login route.
 - `src/components/login-layout.tsx` for the shared Student/Staff login presentation.
 - Two-way source-defined navigation between `/` and `/staff-login`.
-- A disabled Staff Sign In control with an explicit integration-status message.
+- A Staff Sign In control connected to the shared database-backed authentication service.
+- An accessible `Login as` selector with exactly Admin and Knowledge-Base Manager options.
+- Backend role matching before session creation and role-specific navigation to `/admin-dashboard` or `/kb-manager-dashboard`.
 
-The Staff screen maintains local input and password-visibility state only. It does not call authentication APIs, create sessions, select roles, enter `/admin`, or create Knowledge-Base Manager privileges. Existing Student authentication and protected-route behavior remain separate and unchanged.
+The Staff screen submits email, password, and the selected staff role to `POST /api/auth/login`. The backend rejects role mismatch before creating a bearer session. The frontend also validates the returned role and revokes a malformed or mismatched response defensively. Student accounts cannot authenticate through Staff Login.
 
-Type checking, linting, and rendered web-preview verification were blocked in this checkpoint because the shell had no active Node.js version. These source-level implementation statements therefore do not establish runtime operation or visual acceptance.
+The owner has separately reported successful manual Admin login, protected API access, logout, and session revocation against MongoDB Atlas. Knowledge-Base Manager behavior has local automated evidence only; live persistence and rendered UI behavior remain unverified.
+
+### 4.6 Knowledge-Base Manager foundation
+
+**Status:** ROLE, ADMIN PROVISIONING, STAFF LOGIN, ROUTE GUARDS, DASHBOARD, AND MANUAL SOURCE-DRAFT MANAGEMENT IMPLEMENTED AND LOCALLY TESTED
+
+The canonical stored role is `knowledge_manager` in the existing `users` collection. Admin-only `/staff-management` and `src/services/staff.ts` list, provision, deactivate, and reactivate that role through exact backend authorization. Provisioning accepts only name/email, generates a random temporary password, reuses salted-scrypt hashing, returns the plaintext once, and requires the existing initial-password-change workflow. Lifecycle transitions preserve account data while incrementing `credentialVersion`.
+
+`/kb-manager-dashboard` is available only to a real, active Knowledge-Base Manager whose initial password has been replaced. It obtains actual source status and links to the protected `/knowledge-source-management` workflow. That workflow supports manual office-information drafts, creator-only versioned edits, and submission without approval or publication. `requireRole()`, `requireAdmin()`, and `requireKnowledgeManager()` independently enforce server-side access. The existing Admin source routes were not broadened or converted into the final independent-review workflow.
+
+### 4.5 Admin Student account management
+
+**Status:** IMPLEMENTED AND LOCALLY REGRESSION-TESTED; LIVE STUDENT PROVISIONING NOT EXECUTED IN THIS CHECKPOINT
+
+`src/app/student-management.tsx` provides an Admin-only Student account list and provisioning form with required name, Student ID Number, and registered email fields. It uses `src/services/students.ts` and the existing frontend session token. `/student-management` is registered inside the real, non-demo Admin `Stack.Protected` group.
+
+The backend exposes protected `GET /api/admin/students` and `POST /api/admin/students` operations under the existing `requireAdmin()` boundary. The backend fixes the created role to `student`, accepts only `name`, `studentIdNumber`, and `email`, generates a cryptographically random initial password, reuses `provisionUser()` and salted scrypt hashing, and returns the password only in the successful creation response. The Student ID is stored under the embedded `studentProfile` while the existing UUID remains `users.id`. A partial unique index protects Student ID uniqueness without changing legacy Student records.
+
+The screen keeps the returned identity summary and password only in component memory, hides the password by default, supports reveal/hide and Expo Clipboard copy, and clears the state when dismissed, when navigating back, when the session changes, or when the component unmounts. Newly provisioned Students receive `mustChangePassword: true`. After email-based login they are routed to `/change-initial-password`; backend authentication rejects normal protected use until the current temporary password is verified and atomically replaced. The replacement increments `credentialVersion`, revokes all temporary-password sessions, and requires a fresh login. Existing accounts without the flag and Staff authentication are unchanged.
+
+`PATCH /api/admin/students/:id/status` and the corresponding Student Management controls now support soft deactivation/reactivation. The backend validates a Student UUID target and a strict Boolean body under `requireAdmin()`. Each real transition changes only `active` and increments `credentialVersion`; repeated same-state requests return safely without another mutation. The UI shows the current status, confirms deactivation using the Student identity, reports loading/success/errors, and updates the row immediately. No account or session document is deleted.
+
+### 4.6 Admin-assisted Student password recovery
+
+**Status:** ADMIN-MANAGED TEMPORARY-PASSWORD RESET IMPLEMENTED AND LOCALLY REGRESSION-TESTED; LIVE ATLAS EXECUTION NOT PERFORMED
+
+The public Forgot Password operation records only a deduplicated request for an eligible active Student. `POST /api/admin/password-requests/:id/approve-reset` requires Admin authorization and explicit identity-verification confirmation, then generates a cryptographically random temporary password and hashes it with the existing salted-scrypt implementation.
+
+The MongoDB store performs the Student credential update and request resolution in one transaction. It requires an active Student and pending request, sets `mustChangePassword: true`, increments `credentialVersion`, and marks the request handled only after the credential update succeeds. Concurrent or repeated approvals produce only one successful reset. Dismissal changes no credential.
+
+`src/app/password-requests.tsx` adds identity-verification confirmation and one-time temporary-password handoff with reveal, copy, and clear controls. The plaintext password exists only in the successful response and Admin component state; request listings, status responses, logs, and MongoDB records exclude it. The existing initial-password-change backend and route enforce replacement before ordinary Student access.
 
 ## 5. Backend implementation reference
 
@@ -647,8 +679,8 @@ After an authorized inspection or development checkpoint, verified implementatio
 | Frontend navigation | Earlier application paths identified | End-to-end behavior not verified |
 | Native Node.js backend | Earlier backend inspected | Current integration not verified |
 | MongoDB | Explicit `trail_db` target validation and fail-closed configured startup/provisioning paths implemented and locally regression-tested; effective configuration validation passed | One isolated ping failed and closed cleanly; connectivity root cause, reads/writes, and durability remain unverified |
-| Authentication | Login and recovery mechanisms identified | Production behavior not verified |
-| Three-role RBAC | Historical Student/Admin structure | Separate manager role not verified |
+| Authentication | Login, recovery, hashed bearer sessions, Admin authorization, and controlled Student/manager provisioning are implemented | Local auth regression tests pass; owner reports live Admin login, while live manager provisioning was not executed in this checkpoint |
+| Three-role RBAC | Student, Admin, and canonical `knowledge_manager` roles share the existing User/session model | Exact-role login and route guards pass local tests; live manager behavior and full knowledge permissions remain unverified |
 | Knowledge approval | Historical management workflow | Independent exact-version approval not verified |
 | External embeddings | Historical provider integration | Pending-content isolation not verified |
 | Chat and citations | Historical retrieval and display paths | Claim-level support not verified |
@@ -666,7 +698,7 @@ The following matters require separately authorized investigation or design.
 |---|---|
 | Database | Actual connection failure, schemas, indexes, durability |
 | Backend | Current entry point, route map, middleware, Express migration sequence |
-| Authentication | Provisioning, recovery, session lifecycle, role enforcement |
+| Authentication | Knowledge-Base Manager support, privileged-role provisioning policy, live Student provisioning acceptance, and broader operational verification |
 | Knowledge governance | Review-state model, exact-version identity, withdrawal and supersession rules |
 | Source validation | Official-reference validation and allowed document types |
 | External processing | Current provider-call locations and approval-gate enforcement |
@@ -735,4 +767,10 @@ ChatGPT may assist with documentation planning, evidence reconciliation, and acc
 Codex may inspect or modify the local repository only within explicitly approved checkpoint boundaries.
 
 Preparation or acceptance of this document does not authorize work by itself. Phase 01A commands, inspections, edits, and database operations must remain within an explicit owner-authorized scope; one approved execution batch may cover its internal files, checks, and documentation updates.
+
+## P01B-KNOWLEDGE-SOURCE-MANAGEMENT-01 current implementation (2026-11-20)
+
+`src/app/knowledge-source-management.tsx` implements responsive manager listing, protected detail viewing, manual draft creation, creator-only editing, version history, submission confirmation, and loading/error/success states. `src/services/knowledge.ts` uses the existing authenticated API client. The route is registered inside the existing non-demo, password-change-complete `knowledge_manager` Expo Router guard and is linked from `kb-manager-dashboard.tsx`.
+
+The native HTTP backend exposes the manager contracts through `server/src/app.mjs`. `server/src/db/knowledge-store.mjs` validates manual fields, keeps active and draft pointers separate, retains immutable draft history, applies revision checks and per-source operation locks, and submits without creating chunks or embeddings. Only office-verified manual information is supported here; upload and URL ingestion were not added to the manager workflow because the current legacy ingestion path processes content before the independent-approval gate.
 

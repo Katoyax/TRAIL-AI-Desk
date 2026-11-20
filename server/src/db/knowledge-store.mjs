@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { Buffer } from 'node:buffer';
 import { demoKnowledge, isUsableKnowledgeRecord, toPublicKnowledge, SOURCE_TYPES } from '../knowledge.mjs';
 import { cleanText, contentHash, decodeUpload, extractText } from '../ingestion/extract.mjs';
 import { DEFAULT_ALLOWED_DOMAINS, fetchOfficialSource, validateSourceUrl } from '../ingestion/safe-fetch.mjs';
@@ -9,6 +10,10 @@ const problem = (message, status = 400) => Object.assign(new Error(message), { s
 const dateFields = ['dateIssued', 'datePublished', 'effectiveFrom', 'effectiveTo'];
 const textFields = ['title', 'documentTitle', 'documentNumber', 'issuingOffice', 'category'];
 const allowedPatchFields = new Set([...textFields, ...dateFields, 'keywords']);
+const managerDraftFields = new Set([
+  'sourceType', 'title', 'documentTitle', 'documentNumber', 'issuingOffice', 'category',
+  ...dateFields, 'keywords', 'content', 'supportingReferenceUrl', 'expectedRevision',
+]);
 
 function validDate(value) {
   if (typeof value !== 'string' || value.length > 40) return false;
@@ -53,6 +58,32 @@ function actorId(actor) {
   const id = typeof actor === 'string' ? actor : actor?.id || actor?._id || actor?.email;
   if (!id || !String(id).trim()) throw problem('An authenticated reviewer is required.', 403);
   return String(id).slice(0, 200);
+}
+
+// Validates the deliberately narrow manual-entry format used for unapproved manager drafts.
+function validateManagerDraft(input, { partial = false } = {}) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw problem('Knowledge source details must be an object.');
+  if (Object.keys(input).some((key) => !managerDraftFields.has(key))) throw problem('Only supported knowledge source fields may be submitted.');
+  if ((!partial || input.sourceType !== undefined) && input.sourceType !== 'office_verified_information') {
+    throw problem('This workflow currently supports office-verified information only.');
+  }
+  const metadataInput = Object.fromEntries(
+    [...allowedPatchFields].filter((key) => input[key] !== undefined).map((key) => [key, input[key]]),
+  );
+  const metadata = validateSourceMetadata(metadataInput, { partial });
+  if (!partial && !metadata.issuingOffice) throw problem('The issuing office is required.');
+  let supportingReferenceUrl;
+  if (!partial || input.supportingReferenceUrl !== undefined) {
+    supportingReferenceUrl = validateSourceUrl(input.supportingReferenceUrl, { allowedDomains: DEFAULT_ALLOWED_DOMAINS }).href;
+  }
+  let content;
+  if (!partial || input.content !== undefined) {
+    content = cleanText(input.content);
+    if (content.length < 20 || content.length > 750_000) {
+      throw problem('Office information must contain 20 to 750,000 characters of readable text.');
+    }
+  }
+  return { metadata, supportingReferenceUrl, content };
 }
 
 function tokens(text) { return [...new Set((String(text || '').toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) || []).filter((token) => !['the', 'and', 'are', 'what', 'where', 'how', 'for', 'does', 'can', 'this', 'that', 'with', 'from', 'please'].includes(token)))]; }
@@ -103,6 +134,28 @@ export function createKnowledgeStore(connection, {
   async function sourceRecord(source, { content = true } = {}) {
     const version = await activeVersion(source);
     return toPublicKnowledge({ ...version, ...source, id: source._id, sourceId: source._id, content: content ? version?.content || '' : '', fileAvailable: Boolean(version?.file), version: source.version || 0 });
+  }
+  async function managerSourceRecord(source, { content = false } = {}) {
+    const versionId = source?.draftVersion || source?.activeVersion;
+    const version = versionId
+      ? await collection('knowledge_versions').findOne({ _id: versionId, sourceId: source._id })
+      : null;
+    return {
+      id: String(source._id), sourceId: String(source._id), title: source.title || '',
+      documentTitle: source.documentTitle || source.title || '', documentNumber: source.documentNumber || '',
+      issuingOffice: source.issuingOffice || '', category: source.category || '', sourceType: source.sourceType || '',
+      dateIssued: source.dateIssued || '', datePublished: source.datePublished || '',
+      effectiveFrom: source.effectiveFrom || '', effectiveTo: source.effectiveTo || '',
+      keywords: Array.isArray(source.keywords) ? source.keywords : [],
+      supportingReferenceUrl: source.supportingReferenceUrl || '',
+      verificationStatus: source.verificationStatus || 'pending_verification',
+      draftStatus: source.draftStatus || '', isActive: Boolean(source.isActive),
+      activeVersion: source.activeVersion || null, draftVersion: source.draftVersion || null,
+      version: source.version || 0, draftVersionNumber: source.draftVersionNumber || 0,
+      revision: source.revision || 0, createdAt: source.createdAt || '', lastUpdated: source.lastUpdated || '',
+      createdBy: source.createdBy || '', submittedAt: source.submittedAt || '', submittedBy: source.submittedBy || '',
+      ...(content ? { content: version?.content || '' } : {}),
+    };
   }
   async function getSource(id) {
     return writeMongo(async () => { const source = await rawSource(id); return source ? sourceRecord(source) : null; });
@@ -237,6 +290,152 @@ export function createKnowledgeStore(connection, {
       return { records: demoKnowledge.map(toPublicKnowledge).map((record) => ({ ...record, score: lexicalScore(queryTokens, record) })).filter((record) => record.score >= 2.5).sort((a, b) => b.score - a.score).slice(0, limit), mode: 'demo' };
     },
     getSource,
+    // Lists genuine source metadata for the protected manager workspace without exposing file bytes.
+    async listManagerSources({ query = '' } = {}) {
+      return writeMongo(async () => {
+        const sources = await collection('knowledge_sources').find({}).sort({ lastUpdated: -1 }).limit(500).toArray();
+        const normalizedQuery = String(query || '').trim().toLowerCase();
+        const filtered = normalizedQuery
+          ? sources.filter((source) => `${source.title || ''} ${source.documentNumber || ''} ${source.issuingOffice || ''} ${source.category || ''}`.toLowerCase().includes(normalizedQuery))
+          : sources;
+        return Promise.all(filtered.slice(0, 100).map((source) => managerSourceRecord(source)));
+      });
+    },
+    // Returns a protected manager view of one source and its current draft or active content.
+    async getManagerSource(id) {
+      return writeMongo(async () => {
+        const source = await rawSource(id);
+        if (!source) throw problem('Source not found.', 404);
+        return managerSourceRecord(source, { content: true });
+      });
+    },
+    // Creates a non-public manual source draft without generating chunks or external embeddings.
+    async createManagerDraft(input, { actor } = {}) {
+      const creator = actorId(actor);
+      const { metadata, supportingReferenceUrl, content } = validateManagerDraft(input);
+      const timestamp = now().toISOString();
+      const sourceId = randomUUID();
+      const versionId = randomUUID();
+      const version = {
+        _id: versionId, sourceId, version: 1, content, contentHash: contentHash(content),
+        createdAt: timestamp, lastUpdated: timestamp, isActive: false,
+        verificationStatus: 'draft', metadata: {}, createdBy: creator,
+      };
+      const source = {
+        _id: sourceId, ...metadata, sourceType: 'office_verified_information', supportingReferenceUrl,
+        verificationStatus: 'pending_verification', draftStatus: 'draft', isActive: false,
+        activeVersion: null, draftVersion: versionId, version: 0, draftVersionNumber: 1, revision: 0,
+        createdAt: timestamp, lastUpdated: timestamp, createdBy: creator, metadata: {},
+        keywords: metadata.keywords || [],
+      };
+      return writeMongo(async () => {
+        await collection('knowledge_versions').insertOne(version);
+        try { await collection('knowledge_sources').insertOne(source); }
+        catch (error) {
+          await collection('knowledge_versions').deleteOne({ _id: versionId }).catch(() => {});
+          throw error;
+        }
+        return managerSourceRecord(source, { content: true });
+      });
+    },
+    // Saves an owned draft as a new immutable version while retaining any approved active version.
+    async updateManagerDraft(id, input, { actor } = {}) {
+      const editor = actorId(actor);
+      if (!Number.isInteger(input?.expectedRevision) || input.expectedRevision < 0) {
+        throw problem('Reload the source before saving changes.', 409);
+      }
+      const { metadata, supportingReferenceUrl, content } = validateManagerDraft(input, { partial: true });
+      return locked(`manager-draft:${id}`, () => writeMongo(async () => {
+        const source = await rawSource(id);
+        if (!source) throw problem('Source not found.', 404);
+        if (source.createdBy !== editor) throw problem('Only the source creator may edit this draft.', 403);
+        if (source.draftStatus === 'pending_review') throw problem('A submitted source cannot be edited until the review workflow returns it to draft.', 409);
+        if (source.revision !== input.expectedRevision) throw problem('The source changed. Reload it before saving.', 409);
+        const baseVersionId = source.draftVersion || source.activeVersion;
+        const baseVersion = baseVersionId
+          ? await collection('knowledge_versions').findOne({ _id: baseVersionId, sourceId: source._id })
+          : null;
+        if (!baseVersion) throw problem('The source has no editable content version.', 409);
+        const mergedMetadata = validateSourceMetadata({
+          ...Object.fromEntries([...allowedPatchFields].filter((key) => source[key] !== undefined).map((key) => [key, source[key]])),
+          ...metadata,
+        });
+        if (!mergedMetadata.issuingOffice) throw problem('The issuing office is required.');
+        const nextReference = supportingReferenceUrl || source.supportingReferenceUrl;
+        if (!nextReference) throw problem('An independent official supporting reference is required.');
+        const nextContent = content ?? baseVersion.content;
+        if (!nextContent || nextContent.length < 20) throw problem('Office information must contain readable text.');
+        const timestamp = now().toISOString();
+        const versionId = randomUUID();
+        const nextVersion = Math.max(source.version || 0, source.draftVersionNumber || 0) + 1;
+        await collection('knowledge_versions').insertOne({
+          _id: versionId, sourceId: source._id, version: nextVersion, content: nextContent,
+          contentHash: contentHash(nextContent), createdAt: timestamp, lastUpdated: timestamp,
+          isActive: false, verificationStatus: 'draft', metadata: {}, createdBy: editor,
+        });
+        const updated = await collection('knowledge_sources').updateOne(
+          { _id: source._id, revision: source.revision || 0 },
+          { $set: {
+            ...mergedMetadata, sourceType: 'office_verified_information', supportingReferenceUrl: nextReference,
+            draftVersion: versionId, draftVersionNumber: nextVersion, draftStatus: 'draft',
+            lastUpdated: timestamp, updatedBy: editor,
+          }, $inc: { revision: 1 } },
+        );
+        if (!updated.matchedCount) {
+          await collection('knowledge_versions').deleteOne({ _id: versionId }).catch(() => {});
+          throw problem('The source changed while it was being saved. Reload it and try again.', 409);
+        }
+        if (source.draftVersion && source.draftVersion !== source.activeVersion) {
+          await collection('knowledge_versions').updateOne(
+            { _id: source.draftVersion },
+            { $set: { verificationStatus: 'archived_draft', archivedAt: timestamp } },
+          ).catch(() => logger.warn('Draft version archive bookkeeping needs reconciliation.'));
+        }
+        const saved = await rawSource(id);
+        return managerSourceRecord(saved, { content: true });
+      }));
+    },
+    // Submits an owned draft for later independent review without approving or publishing it.
+    async submitManagerDraft(id, { actor, expectedRevision } = {}) {
+      const submitter = actorId(actor);
+      if (!Number.isInteger(expectedRevision) || expectedRevision < 0) throw problem('Reload the source before submitting it.', 409);
+      return locked(`manager-submit:${id}`, () => writeMongo(async () => {
+        const source = await rawSource(id);
+        if (!source) throw problem('Source not found.', 404);
+        if (source.createdBy !== submitter) throw problem('Only the source creator may submit this draft.', 403);
+        if (source.draftStatus === 'pending_review') return managerSourceRecord(source, { content: true });
+        if (source.draftStatus !== 'draft' || !source.draftVersion) throw problem('Only a complete draft may be submitted.', 409);
+        if (source.revision !== expectedRevision) throw problem('The source changed. Reload it before submitting.', 409);
+        const timestamp = now().toISOString();
+        const updated = await collection('knowledge_sources').updateOne(
+          { _id: source._id, revision: source.revision || 0, draftStatus: 'draft' },
+          { $set: { draftStatus: 'pending_review', submittedAt: timestamp, submittedBy: submitter, lastUpdated: timestamp }, $inc: { revision: 1 } },
+        );
+        if (!updated.matchedCount) throw problem('The draft was already submitted or changed. Reload it before continuing.', 409);
+        await collection('knowledge_versions').updateOne(
+          { _id: source.draftVersion, sourceId: source._id },
+          { $set: { verificationStatus: 'pending_review', submittedAt: timestamp, submittedBy: submitter } },
+        ).catch(() => logger.warn('Submitted version bookkeeping needs reconciliation.'));
+        const submitted = await rawSource(id);
+        return managerSourceRecord(submitted, { content: true });
+      }));
+    },
+    // Returns source version history without exposing file bytes or version content.
+    async managerVersions(id) {
+      return writeMongo(async () => {
+        const source = await rawSource(id);
+        if (!source) throw problem('Source not found.', 404);
+        const versions = await collection('knowledge_versions').find(
+          { sourceId: String(id) }, { projection: { file: 0, content: 0 } },
+        ).sort({ version: -1 }).limit(100).toArray();
+        return versions.map((version) => ({
+          id: String(version._id), version: version.version,
+          isActive: version._id === source.activeVersion, isDraft: version._id === source.draftVersion,
+          contentHash: version.contentHash, createdAt: version.createdAt,
+          verificationStatus: version.verificationStatus || 'draft', createdBy: version.createdBy || '',
+        }));
+      });
+    },
     async createSource(input, { actor } = {}) {
       const reviewer = actorId(actor);
       collection('knowledge_sources');

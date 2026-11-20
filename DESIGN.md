@@ -343,13 +343,13 @@ The precise layout and wording require later design review.
 
 ### 12.1 Shared Student and Staff login presentation
 
-**Status:** UI IMPLEMENTED — AUTHENTICATION NOT INTEGRATED
+**Status:** ADMIN AUTHENTICATION INTEGRATED; KNOWLEDGE-BASE MANAGER AUTHENTICATION NOT IMPLEMENTED
 
 The Student Login and Staff Login share the established USTP/TRAIL identity panel, responsive layout, typography, credential-field styling, password visibility behavior, loading/error presentation patterns, keyboard behavior, and accessible interaction sizing.
 
-The Staff Login is titled **Admin & Knowledge-Base Manager Login** and provides a return path to the Student Login. Its disabled Sign In control and integration-status message must remain visually and semantically clear until separately authorized authentication work is complete.
+The Staff Login is titled **Admin & Knowledge-Base Manager Login** and provides a return path to the Student Login. Its Sign In control uses the shared authentication UI and accepts only real Admin sessions until the separate Knowledge-Base Manager role is implemented.
 
-The shared presentation does not merge Admin and Knowledge-Base Manager permissions, establish a trusted role, or grant access to a protected destination. Source structure was reviewed during implementation, but rendered responsive and browser behavior remains unverified because the local web preview could not start without an active Node.js version.
+The shared presentation does not merge Admin and Knowledge-Base Manager permissions. The backend-returned role remains authoritative, and Admin screens are registered in a real, non-demo protected route group.
 
 ## 13. Student dashboard and university information
 
@@ -486,9 +486,25 @@ Possible reference numbers, tracking pages, status timelines, or office-routing 
 
 Historical local concern-preview screens do not prove real submission.
 
-## 17. Admin source-management design
+## 17. Admin management design
 
-**Relevant requirements:** FR-024–FR-029, FR-032–FR-035; NFR-011.
+**Relevant requirements:** FR-003, FR-024–FR-029, FR-032–FR-035; NFR-002, NFR-007, NFR-011.
+
+### 17.1 Student account management
+
+`/student-management` uses the established Admin Dashboard colors, typography, cards, responsive width, loading/error states, and accessible controls. It provides an Admin-controlled name/Student-ID/email form, a real Student list, active/inactive status, and an initial-password panel hidden by default.
+
+The creation confirmation presents the Student full name, Student ID Number, registered email, and temporary password only following a successful response. Reveal/hide, copy, and dismiss controls are explicit, and the notice requires private delivery. Newly provisioned Students are routed to a matching responsive password-change screen and cannot enter ordinary protected Student screens until the backend confirms replacement. Public self-registration remains unavailable.
+
+Student rows now include a confirmed Reset Password action. Confirmation states the registered destination, and the UI reports success only from the protected backend response; no recovery token is displayed or retained.
+
+### 17.2 Password Reset Requests
+
+`/password-requests` follows the existing Admin header, card, typography, color, responsive wrapping, loading/empty/error, and accessible-button patterns. It shows the real pending count, safe Student/request metadata, refresh, View Student, Approve & Reset, and Dismiss actions.
+
+A prominent warning states that a Forgot Password submission does not establish requester identity. Approval requires an explicit identity-verification confirmation. After success, a one-time credential card shows the Student identity and hidden temporary password with reveal, copy, and dismiss-and-clear controls.
+
+### 17.3 Source-management design
 
 The Admin interface should make permitted operations understandable and traceable.
 

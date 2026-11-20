@@ -217,11 +217,11 @@ The target authentication system must support registered users and secure accoun
 - Prevent access after session invalidation.
 - Avoid revealing sensitive account information through failure messages.
 
-### Historical evidence
+### Current implementation evidence
 
-Earlier inspection identified password-security, login, token, and recovery-related mechanisms.
+Current source implements salted scrypt password hashing, opaque random bearer tokens stored only by SHA-256 hash, explicit session expiry checks, logout revocation, generic invalid-credential responses, and backend Admin authorization.
 
-Their current end-to-end correctness and integration with live MongoDB remain unverified.
+Local authentication regression tests cover these controls. The owner separately reports successful live Admin login and revocation; this checkpoint did not perform live Student provisioning or inspect private configuration.
 
 ### Future testing
 
@@ -263,6 +263,10 @@ Every protected operation must independently validate authorization.
 
 Hiding buttons or routes is not sufficient.
 
+The implemented authentication service recognizes the canonical `knowledge_manager` role in the existing User/session model. Staff Login role mismatch is rejected before session creation. Reusable exact-role guards protect Admin and Knowledge-Base Manager route families independently; Students cannot use either family, managers cannot perform Student/staff/password-request administration, and Admin sessions cannot use the manager-only source-list route.
+
+Admin-only manager provisioning fixes the role server-side, stores only a salted-scrypt password hash, returns the random temporary password once, and requires replacement before protected access. Status changes are non-destructive and increment `credentialVersion` to invalidate earlier sessions. This foundation does not yet authorize independent source approval or other manager mutations.
+
 ### Separation-of-duties rule
 
 The person who submits a source version must not independently approve that same submission.
@@ -273,15 +277,29 @@ Administrative privileges must not bypass this restriction.
 
 **Relevant requirements:** FR-002–FR-003; NFR-007.
 
-The system needs a controlled account lifecycle.
+The system needs a controlled account lifecycle. Admin-controlled Student provisioning is now implemented as a bounded subset.
 
-Future implementation must address:
+The implemented Student path:
 
-- Account creation and provisioning.
+- Requires a real Admin bearer session and backend `requireAdmin()` authorization.
+- Accepts only Student name, Student ID Number, and email; the backend fixes the role to `student`.
+- Reuses normalized email validation, unique-email enforcement, and salted scrypt hashing, and enforces Student ID uniqueness with a partial unique index.
+- Generates the initial password with a cryptographically secure random source.
+- Returns that password only in the successful response and does not persist or log it as plaintext.
+- Projects only allowlisted public fields when listing Student accounts.
+- Does not automatically retry an ambiguous creation request.
+
+The Admin UI keeps the initial password only in component memory, hides it by default, supports an explicit clipboard copy action, and clears its component state on dismissal, navigation, session change, or unmount. Delivery must use an approved private channel; operating-system clipboard contents remain under device/user control after copying.
+
+Newly provisioned Students are marked `mustChangePassword: true`. The frontend routes those real Student sessions only to the initial-password-change screen, and backend authentication rejects ordinary protected operations while the flag remains set. Completion requires the current temporary password, validates and hashes a different new password, clears the flag, and increments `credentialVersion` in the same account write so every temporary-password session becomes invalid. Existing accounts without the flag, Staff accounts, Forgot Password, and Admin password assistance remain on their established paths.
+
+Student lifecycle changes are Admin-only and target the internal UUID. Deactivation preserves the account document but atomically sets `active: false` and increments `credentialVersion`; login rejects the inactive account and existing sessions fail subsequent authorization. Reactivation sets `active: true`, increments the version for the new transition, and requires a fresh login without changing the password, Student ID, email, or pending initial-password requirement. The Student endpoint cannot target Staff roles.
+
+Future implementation must still address:
+
 - Role assignment and changes.
-- Credential recovery.
+- Institutional operating procedures for identity assistance and approved retention.
 - Expired or revoked access.
-- Account disabling.
 - Appropriate administrative recordkeeping.
 
 ### Privilege assignment
@@ -294,16 +312,17 @@ The exact authority to create privileged accounts remains an open policy decisio
 
 Password recovery should prevent unauthorized account takeover.
 
-Future design should address:
+Current source and local test evidence establishes generic public assistance responses, eligible-active-Student checks, deduplicated pending request records, and bounded process-local request jobs. Admin approval requires an authenticated Admin and explicit confirmation of an approved identity-verification procedure; knowledge of an email address alone is insufficient.
 
-- Recovery-token validity.
-- Expiry.
-- One-time or equivalent replay-safe behavior.
-- Sensitive account-discovery leakage.
-- Credential-reset completion.
-- Appropriate session handling after recovery.
+The approved reset path uses a random temporary password, stores only its salted-scrypt hash, increments `credentialVersion`, and requires a different password through the existing mandatory-change flow. The password is returned once, hidden by default, and cleared from UI state on dismissal, navigation, session change, or unmount. Listings and status operations exclude credentials. MongoDB transaction boundaries prevent a request from being marked handled without the corresponding Student credential update.
 
-The actual recovery service, delivery method, and implementation remain unverified.
+Live provider delivery, institutional identity-assistance procedures, and the final retention policy remain unverified or require owner/institutional approval.
+
+### Password-recovery abuse limiting
+
+The native API applies layered process-local fixed-window limits using the direct socket IP rather than unverified forwarded headers. `POST /api/auth/forgot-password` uses a dedicated 40-request-per-15-minute bucket, other `/api/auth/*` operations retain their 20-request-per-15-minute bucket, and the general 120-request-per-minute API bucket remains active. Eligible and ineligible Forgot Password submissions count equally, preserving the generic public response and preventing email rotation from bypassing the IP control. HTTP 429 responses include a positive `Retry-After` value derived from the actual fixed-window expiry; rejected attempts do not extend that expiry.
+
+These in-memory buckets are local to one server process and reset when that process restarts. A multi-instance deployment would require an approved shared limiter, and final production thresholds remain subject to deployment evidence and institutional security review.
 
 ## 10. Session security and user isolation
 
@@ -949,4 +968,10 @@ ChatGPT may assist with documentation preparation and evidence review.
 Codex may inspect or modify the local repository only within explicitly authorized checkpoint boundaries.
 
 Preparation or acceptance of this document does not by itself authorize source-code changes, security scans, database operations, provider requests, or work outside an owner-approved checkpoint.
+
+## P01B manager source-control evidence (2026-11-20)
+
+Manager endpoints require a current real `knowledge_manager` session on every request. Creator identity is captured server-side and creator-only mutation prevents one manager from silently editing another account's draft. Client-controlled approval, activation, creator, reviewer, and publication fields are rejected. Manual sources require an issuing office and allowlisted official supporting-reference URL.
+
+Draft persistence performs no external fetch, AI generation, embedding, chunk creation, or Student publication. Submission is not approval. The still-existing legacy Admin ingestion pipeline's pre-review chunk/embedding behavior remains a governance gap requiring separate remediation before that path may be treated as compliant with the approved pre-approval provider boundary.
 

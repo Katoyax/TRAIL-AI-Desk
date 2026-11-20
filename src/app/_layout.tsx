@@ -32,7 +32,18 @@ export default function RootLayout() {
         <Stack.Screen name="staff-login" />
         <Stack.Screen name="forgot-password" />
         <Stack.Screen name="reset-password" />
-        <Stack.Protected guard={Boolean(session)}>
+        <Stack.Protected guard={Boolean(
+          session &&
+          !session.demo &&
+          session.user.mustChangePassword &&
+          ['student', 'knowledge_manager'].includes(session.user.role)
+        )}>
+          <Stack.Screen name="change-initial-password" />
+        </Stack.Protected>
+        <Stack.Protected guard={Boolean(
+          session?.user.role === 'student' &&
+          (!session.user.mustChangePassword || session.demo)
+        )}>
           <Stack.Screen name="dashboard" />
           <Stack.Screen name="ai-desk" />
           <Stack.Screen name="information" />
@@ -42,6 +53,17 @@ export default function RootLayout() {
         <Stack.Protected guard={session?.user.role === 'admin' && !session.demo}>
           <Stack.Screen name="admin" />
           <Stack.Screen name="admin-dashboard" />
+          <Stack.Screen name="student-management" />
+          <Stack.Screen name="password-requests" />
+          <Stack.Screen name="staff-management" />
+        </Stack.Protected>
+        <Stack.Protected guard={Boolean(
+          session?.user.role === 'knowledge_manager' &&
+          !session.demo &&
+          !session.user.mustChangePassword
+        )}>
+          <Stack.Screen name="kb-manager-dashboard" />
+          <Stack.Screen name="knowledge-source-management" />
         </Stack.Protected>
       </Stack>
     </>
