@@ -1,12 +1,14 @@
 import { createServer } from 'node:http';
-import { generateAnswer } from './ai/generate.mjs';
+import { Buffer } from 'node:buffer';
 import { createEmbedder } from './ai/embeddings.mjs';
+import { generateAnswer } from './ai/generate.mjs';
 import { createAuthService } from './auth/service.mjs';
-import { demoKnowledge, isUsableKnowledgeRecord, toPublicKnowledge } from './knowledge.mjs';
-import { buildRetrievedContext, isOutOfScope, normalizeQuestion, rankKnowledge, selectContext } from './rag/retrieval.mjs';
-import { isTimeSensitive, hasCurrentEventEvidence, noAnnouncementAnswer } from './rag/freshness.mjs';
 import { createKnowledgeStore } from './db/knowledge-store.mjs';
+import { demoKnowledge, isUsableKnowledgeRecord, toPublicKnowledge } from './knowledge.mjs';
+import { hasCurrentEventEvidence, isTimeSensitive, noAnnouncementAnswer } from './rag/freshness.mjs';
+import { buildRetrievedContext, isOutOfScope, normalizeQuestion, rankKnowledge, selectContext } from './rag/retrieval.mjs';
 import { createRateLimiter } from './security/rate-limit.mjs';
+
 
 const personalAnswer = 'TRAIL AI Desk does not access personal student records, grades, class schedules, enrolled subjects, accounts, or financial information. Please use PRISMS or contact the appropriate university office.';
 const noAnswer = 'I could not find relevant verified information in the current knowledge base. Please check official USTP channels or contact the appropriate university office.';
@@ -41,12 +43,13 @@ function sourceFor(record) {
     verificationMethod: metadata?.verificationMethod, contentVerifiedAt: metadata?.contentVerifiedAt } };
 }
 
-export function createApiServer({ connection = null, logger = console, aiConfig = process.env, config = aiConfig, knowledgeStore, authService, now = () => new Date(), answerGenerator = generateAnswer } = {}) {
+// Creates the native HTTP API with authentication, knowledge, and abuse controls.
+export function createApiServer({ connection = null, logger = console, aiConfig = process.env, config = aiConfig, knowledgeStore, authService, now = () => new Date(), rateLimitNow = Date.now, answerGenerator = generateAnswer } = {}) {
   const embed = createEmbedder(aiConfig);
   const store = knowledgeStore || createKnowledgeStore(connection, { logger, config, embed });
   store.setEmbeddingFunction?.(embed);
   const auth = authService || createAuthService({ connection, config, logger });
-  const rateLimit = createRateLimiter();
+  const rateLimit = createRateLimiter({ now: rateLimitNow });
   const origins = (config.CORS_ORIGINS || 'http://localhost:8081,http://127.0.0.1:8081,http://localhost:19006').split(',').map((item) => item.trim());
 
   const server = createServer(async (request, response) => {
@@ -59,14 +62,19 @@ export function createApiServer({ connection = null, logger = console, aiConfig 
       'access-control-allow-methods': 'GET,POST,PATCH,OPTIONS',
       ...(origin && origins.includes(origin) ? { 'access-control-allow-origin': origin } : {}),
     };
-    const send = (status, data) => { response.writeHead(status, headers); response.end(JSON.stringify(data)); };
+    const send = (status, data, responseHeaders = {}) => {
+      response.writeHead(status, { ...headers, ...responseHeaders });
+      response.end(JSON.stringify(data));
+    };
     try {
       if (origin && !origins.includes(origin)) return send(403, { error: 'This application origin is not allowed.' });
       if (request.method === 'OPTIONS') { response.writeHead(204, headers); response.end(); return; }
       const url = new URL(request.url || '/', 'http://localhost');
       const ip = request.socket.remoteAddress || 'unknown'; // Do not trust arbitrary forwarded headers.
       rateLimit(`general:${ip}`, { limit: 120 });
-      if (url.pathname.startsWith('/api/auth/')) rateLimit(`auth:${ip}`, { limit: 20, windowMs: 15 * 60000 });
+      const isForgotPassword = request.method === 'POST' && url.pathname === '/api/auth/forgot-password';
+      if (isForgotPassword) rateLimit(`forgot-password:${ip}`, { limit: 40, windowMs: 15 * 60000 });
+      else if (url.pathname.startsWith('/api/auth/')) rateLimit(`auth:${ip}`, { limit: 20, windowMs: 15 * 60000 });
       if (url.pathname === '/api/chat') rateLimit(`chat:${ip}`, { limit: 30 });
 
       if (request.method === 'GET' && url.pathname === '/health') return send(200, { status: 'ok', database: store.databaseStatus,
@@ -80,11 +88,45 @@ export function createApiServer({ connection = null, logger = console, aiConfig 
       }
       const authActions = { '/api/auth/login': 'login', '/api/auth/forgot-password': 'forgotPassword', '/api/auth/reset-password': 'resetPassword' };
       if (request.method === 'POST' && authActions[url.pathname]) return send(200, await auth[authActions[url.pathname]](await readBody(request)));
-      if (request.method === 'GET' && url.pathname === '/api/auth/me') return send(200, { user: await auth.authenticate(request.headers.authorization) });
+      if (request.method === 'POST' && url.pathname === '/api/auth/change-initial-password') {
+        return send(200, await auth.changeInitialPassword(request.headers.authorization, await readBody(request)));
+      }
+      if (request.method === 'GET' && url.pathname === '/api/auth/me') return send(200, { user: await auth.getCurrentUser(request.headers.authorization) });
       if (request.method === 'POST' && url.pathname === '/api/auth/logout') return send(200, await auth.logout(request.headers.authorization));
 
       if (url.pathname.startsWith('/api/admin/')) {
         const actor = await auth.requireAdmin(request.headers.authorization);
+        const studentResetMatch = url.pathname.match(/^\/api\/admin\/students\/([A-Za-z0-9_-]{1,100})\/reset-password$/);
+        if (studentResetMatch && request.method === 'POST') {
+          rateLimit(`admin-password-reset:${actor.id}`, { limit: 20, windowMs: 15 * 60_000 });
+          return send(200, await auth.requestStudentPasswordReset(studentResetMatch[1]));
+        }
+        if (url.pathname === '/api/admin/students' && request.method === 'GET') return send(200, { items: await auth.listStudents() });
+        if (url.pathname === '/api/admin/students' && request.method === 'POST') return send(201, await auth.provisionStudent(await readBody(request)));
+        if (url.pathname === '/api/admin/kb-managers' && request.method === 'GET') {
+          return send(200, { items: await auth.listKnowledgeManagers() });
+        }
+        if (url.pathname === '/api/admin/kb-managers' && request.method === 'POST') {
+          return send(201, await auth.provisionKnowledgeManager(await readBody(request)));
+        }
+        const managerStatusMatch = url.pathname.match(/^\/api\/admin\/kb-managers\/([A-Za-z0-9_-]{1,100})\/status$/);
+        if (managerStatusMatch && request.method === 'PATCH') {
+          return send(200, { user: await auth.updateKnowledgeManagerStatus(managerStatusMatch[1], await readBody(request)) });
+        }
+        const studentStatusMatch = url.pathname.match(/^\/api\/admin\/students\/([A-Za-z0-9_-]{1,100})\/status$/);
+        if (studentStatusMatch && request.method === 'PATCH') {
+          return send(200, { user: await auth.updateStudentStatus(studentStatusMatch[1], await readBody(request)) });
+        }
+        if (url.pathname === '/api/admin/password-requests' && request.method === 'GET') return send(200, await auth.listPasswordResetRequests());
+        const passwordRequestApprovalMatch = url.pathname.match(/^\/api\/admin\/password-requests\/([A-Za-z0-9_-]{1,100})\/approve-reset$/);
+        if (passwordRequestApprovalMatch && request.method === 'POST') {
+          rateLimit(`admin-password-reset:${actor.id}`, { limit: 20, windowMs: 15 * 60_000 });
+          return send(200, await auth.approvePasswordResetRequest(passwordRequestApprovalMatch[1], await readBody(request), actor));
+        }
+        const passwordRequestMatch = url.pathname.match(/^\/api\/admin\/password-requests\/([A-Za-z0-9_-]{1,100})$/);
+        if (passwordRequestMatch && request.method === 'PATCH') {
+          return send(200, { request: await auth.updatePasswordResetRequest(passwordRequestMatch[1], await readBody(request), actor) });
+        }
         if (url.pathname === '/api/admin/sources' && request.method === 'GET') return send(200, { items: await store.list({ query: url.searchParams.get('query') || url.searchParams.get('q') || '', admin: true }), database: store.databaseStatus });
         if (url.pathname === '/api/admin/sources' && request.method === 'POST') return send(201, { source: await store.createSource(await readBody(request, 7500000), { actor }) });
         const match = url.pathname.match(/^\/api\/admin\/sources\/([a-zA-Z0-9_-]{1,100})(?:\/(verify|unverify|archive|refresh|versions))?$/);
@@ -106,6 +148,38 @@ export function createApiServer({ connection = null, logger = console, aiConfig 
           }
         }
         return send(404, { error: 'Administrative route not found.' });
+      }
+
+      if (url.pathname.startsWith('/api/knowledge-manager/')) {
+        const actor = await auth.requireKnowledgeManager(request.headers.authorization);
+        if (url.pathname === '/api/knowledge-manager/sources' && request.method === 'GET') {
+          return send(200, {
+            items: await store.listManagerSources({ query: url.searchParams.get('query') || '' }),
+            database: store.databaseStatus,
+            actor: { id: actor.id, role: actor.role },
+          });
+        }
+        if (url.pathname === '/api/knowledge-manager/sources' && request.method === 'POST') {
+          return send(201, { source: await store.createManagerDraft(await readBody(request, 1_000_000), { actor }) });
+        }
+        const managerSourceMatch = url.pathname.match(
+          /^\/api\/knowledge-manager\/sources\/([a-zA-Z0-9_-]{1,100})(?:\/(versions|submit))?$/,
+        );
+        if (managerSourceMatch) {
+          const [, id, action] = managerSourceMatch;
+          if (!action && request.method === 'GET') return send(200, { source: await store.getManagerSource(id) });
+          if (!action && request.method === 'PATCH') {
+            return send(200, { source: await store.updateManagerDraft(id, await readBody(request, 1_000_000), { actor }) });
+          }
+          if (action === 'versions' && request.method === 'GET') {
+            return send(200, { items: await store.managerVersions(id) });
+          }
+          if (action === 'submit' && request.method === 'POST') {
+            const body = await readBody(request);
+            return send(200, { source: await store.submitManagerDraft(id, { actor, expectedRevision: body.expectedRevision }) });
+          }
+        }
+        return send(404, { error: 'Knowledge-Base Manager route not found.' });
       }
 
       const documentMatch = url.pathname.match(/^\/api\/documents\/([a-zA-Z0-9_-]{1,100})$/);
@@ -169,7 +243,10 @@ export function createApiServer({ connection = null, logger = console, aiConfig 
       return send(404, { error: 'Route not found.' });
     } catch (error) {
       logger.error(`Request failed (${error.status || 503}; ${error.name || 'Error'}).`);
-      return send(error.status || 503, { error: error.status ? error.message : 'The server could not complete the request.' });
+      const retryHeaders = error.status === 429 && Number.isInteger(error.retryAfter) && error.retryAfter > 0
+        ? { 'retry-after': String(error.retryAfter) }
+        : {};
+      return send(error.status || 503, { error: error.status ? error.message : 'The server could not complete the request.' }, retryHeaders);
     }
   });
   server.knowledgeStore = store;
@@ -178,3 +255,4 @@ export function createApiServer({ connection = null, logger = console, aiConfig 
 }
 
 export { demoKnowledge };
+

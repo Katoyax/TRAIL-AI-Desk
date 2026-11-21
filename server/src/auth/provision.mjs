@@ -1,8 +1,12 @@
-import { Writable } from 'node:stream';
-import { createInterface } from 'node:readline/promises';
 import { MongoClient } from 'mongodb';
-import { createMongoAuthStore, ensureAuthIndexes } from './store.mjs';
+import dns from 'node:dns';
+import { createInterface } from 'node:readline/promises';
+import { Writable } from 'node:stream';
+import { validateMongoConfig } from '../config.mjs';
 import { provisionUser } from './service.mjs';
+import { createMongoAuthStore, ensureAuthIndexes } from './store.mjs';
+
+
 
 async function readPassword() {
   if (!process.stdin.isTTY) {
@@ -23,18 +27,43 @@ async function readPassword() {
 let client;
 try {
   const args = process.argv.slice(2);
-  if (args.length % 2 || args.some((value, index) => index % 2 === 0 && !['--email', '--name', '--role'].includes(value))) {
-    throw new Error('Usage: node --env-file-if-exists=.env src/auth/provision.mjs --email <email> --name <name> --role <student|admin>. Password is read privately from the terminal or stdin; never pass it in command arguments.');
+  if (args.length % 2 || args.some((value, index) => index % 2 === 0 && !['--email', '--name', '--role', '--student-id'].includes(value))) {
+    throw new Error('Usage: node --env-file-if-exists=.env src/auth/provision.mjs --email <email> --name <name> --role <student|admin> [--student-id <Student ID Number>]. Student accounts require --student-id. Password is read privately from the terminal or stdin; never pass it in command arguments.');
   }
   const fields = Object.fromEntries(Array.from({ length: args.length / 2 }, (_, index) => [args[index * 2].slice(2), args[index * 2 + 1]]));
   if (!fields.email || !fields.name || !['student', 'admin'].includes(fields.role)) throw new Error('Email, name, and an explicit student or admin role are required.');
-  if (!process.env.MONGODB_URI) throw new Error('Configure MONGODB_URI before provisioning an account.');
-  const password = await readPassword();
-  client = new MongoClient(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 });
-  await client.connect();
-  const database = client.db(process.env.MONGODB_DATABASE || 'trail_ai_desk');
+  if (fields.role === 'student' && !fields['student-id']) throw new Error('Student provisioning requires an explicit Student ID Number.');
+  if (fields.role === 'admin' && fields['student-id'] !== undefined) throw new Error('Do not assign a Student ID Number to an Admin account.');
+  const target = validateMongoConfig(process.env, { allowDemo: false });
+
+const password = await readPassword();
+
+// Match the backend's optional Atlas DNS configuration.
+const dnsServer = process.env.MONGODB_DNS_SERVER?.trim();
+
+if (dnsServer) {
+  dns.setServers([dnsServer]);
+}
+
+// Match the backend's MongoDB connection options.
+client = new MongoClient(target.uri, {
+  serverSelectionTimeoutMS: 5000,
+  ...(process.env.MONGODB_IPV4_ONLY === 'true'
+    ? { family: 4 }
+    : {}),
+});
+
+await client.connect();
+
+  const database = client.db(target.databaseName);
   await ensureAuthIndexes(database);
-  const user = await provisionUser(createMongoAuthStore({ database }), { ...fields, password });
+  const user = await provisionUser(createMongoAuthStore({ database }), {
+    email: fields.email,
+    name: fields.name,
+    role: fields.role,
+    studentIdNumber: fields['student-id'],
+    password,
+  });
   console.log(`Created ${user.role} account ${user.email}. No default accounts were created.`);
 } catch (error) {
   // Avoid printing MongoDB connection errors that could include a URI/secret.

@@ -16,5 +16,14 @@
     "cheerio": "^1.2.0",
     "mongodb": "^6.21.0",
     "pdf-parse": "^2.4.5"
-  }
+  },
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "test": "test"
+  },
+  "devDependencies": {},
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
 }

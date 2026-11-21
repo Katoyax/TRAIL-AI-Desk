@@ -111,16 +111,40 @@ test('empty, malformed, and structurally invalid questions return useful client 
   assert.equal(nonObject.status, 400);
 });
 
-test('MongoDB unavailable falls back to bundled demo records', async () => {
-  const connection = await connectMongo({ uri: 'mongodb://127.0.0.1:1', timeoutMS: 100, logger: quietLogger });
+test('an explicitly unconfigured MongoDB uses bundled demo records', async () => {
+  const connection = await connectMongo({ uri: undefined, databaseName: undefined, logger: quietLogger });
   assert.equal(connection, null);
-  const invalidUriConnection = await connectMongo({ uri: 'not-a-mongodb-uri', timeoutMS: 100, logger: quietLogger });
-  assert.equal(invalidUriConnection, null);
   const base = await startApi({ connection });
   const health = await (await fetch(`${base}/health`)).json();
   assert.equal(health.database, 'demo-fallback');
   assert.equal((await chat(base, 'Where is the Registrar Office?')).body.sources[0].dataStatus, 'demo_unverified');
   await closeMongo(connection);
+});
+
+test('a configured MongoDB connection failure does not silently start demo mode', async () => {
+  let closeAttempted = false;
+  const clientFactory = () => ({
+    connect: async () => { throw new Error('fictional-sensitive-driver-detail'); },
+    close: async () => { closeAttempted = true; },
+  });
+  const messages = [];
+  const logger = {
+    info: (message) => messages.push(message),
+    error: (message) => messages.push(message),
+  };
+
+  await assert.rejects(
+    connectMongo({
+      uri: 'mongodb+srv://trail_db:test-password@cluster1.9duxxbp.mongodb.net/',
+      databaseName: 'trail_db',
+      logger,
+      clientFactory,
+    }),
+    /MongoDB live connection failed\./,
+  );
+  assert.equal(closeAttempted, true);
+  assert.equal(messages.some((message) => /demo fallback/i.test(message)), false);
+  assert.equal(messages.some((message) => message.includes('fictional-sensitive-driver-detail')), false);
 });
 
 test('a MongoDB query failure switches an active API to demo fallback', async () => {
